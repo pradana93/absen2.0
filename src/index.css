@@ -1,0 +1,221 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Baloo 2", "Plus Jakarta Sans", sans-serif;
+  --font-body: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* ink — warm navy scale */
+  --color-ink-950: #101826;
+  --color-ink-900: #172a59;
+  --color-ink-800: #1f3a78;
+  --color-ink-700: #2c4a8f;
+  --color-ink-600: #3f5da3;
+  --color-ink-500: #5b77b8;
+  --color-ink-400: #7c93c4;
+  --color-ink-300: #a3b4d6;
+  --color-ink-200: #ccd6ea;
+  --color-ink-100: #e3e9f5;
+  --color-ink-50: #f0f3fa;
+
+  --color-paper: #f4f6fb;
+
+  /* brand — rewritten at runtime by brand presets */
+  --color-sun-100: #fff0dd;
+  --color-sun-300: #ffc684;
+  --color-sun-400: #ff9d2e;
+  --color-sun-500: #f07300;
+  --color-sun-600: #d95f00;
+  --color-sun-700: #b34e00;
+
+  /* module pastels */
+  --color-sky-100: #e0f1fd;
+  --color-sky-200: #bfe4fa;
+  --color-sky-300: #8fd0f7;
+  --color-sky-500: #2b9fe0;
+  --color-sky-600: #157fc0;
+  --color-teal-100: #d9f5ef;
+  --color-teal-300: #7cdcc9;
+  --color-teal-500: #12a48b;
+  --color-teal-600: #0c8672;
+  --color-grape-100: #ece4f9;
+  --color-grape-200: #d9c8f3;
+  --color-grape-300: #bfa3ec;
+  --color-grape-500: #7a4fc0;
+  --color-grape-600: #623ba3;
+  --color-coral-100: #fde4e0;
+  --color-coral-300: #f7a295;
+  --color-coral-500: #e85c46;
+  --color-coral-600: #c94530;
+
+  /* semantic */
+  --color-ok-100: #dcf6e9;
+  --color-ok-300: #7fdcb0;
+  --color-ok-500: #159a6d;
+  --color-ok-600: #0f7d58;
+  --color-warn-100: #fdf1d7;
+  --color-warn-200: #fae0a8;
+  --color-warn-300: #f7cf7e;
+  --color-warn-500: #e0950f;
+  --color-warn-600: #bd7a06;
+  --color-danger-100: #fce3e1;
+  --color-danger-200: #f6b8b4;
+  --color-danger-300: #f1918b;
+  --color-danger-500: #e5484d;
+  --color-danger-600: #c53339;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--color-paper);
+  color: var(--color-ink-900);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-bg {
+  background:
+    radial-gradient(900px 420px at 110% -6%, color-mix(in srgb, var(--color-sun-400) 13%, transparent), transparent 60%),
+    radial-gradient(760px 420px at -18% 8%, color-mix(in srgb, var(--color-sky-500) 9%, transparent), transparent 55%),
+    radial-gradient(circle at 1px 1px, rgba(23, 42, 89, 0.05) 1px, transparent 1.2px) 0 0 / 22px 22px,
+    var(--color-paper);
+}
+
+.card {
+  @apply rounded-2xl border border-ink-100 bg-white shadow-[0_10px_30px_rgba(23,42,89,0.06)];
+}
+.card-press { @apply transition-transform duration-150 active:scale-[0.98]; }
+
+.input {
+  @apply w-full rounded-xl border border-ink-200 bg-white px-3.5 py-3 text-[15px] font-semibold text-ink-900 outline-none transition
+    placeholder:font-medium placeholder:text-ink-300 focus:border-sun-400 focus:ring-4 focus:ring-sun-400/15;
+}
+.label {
+  @apply mb-1.5 block text-[11px] font-extrabold tracking-[0.12em] text-ink-400 uppercase;
+}
+
+.btn-sun    { @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-sun-400 to-sun-500 px-5 py-3.5 font-display text-[15px] font-bold text-white shadow-[0_10px_24px_rgba(240,115,0,0.35)] transition-all duration-150 select-none hover:brightness-105 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100; }
+.btn-ghost  { @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-ink-200 bg-white px-4 py-3 font-display text-[14px] font-bold text-ink-700 transition-all duration-150 select-none hover:border-ink-300 hover:bg-ink-50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40; }
+.btn-danger { @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-danger-100 px-4 py-3 font-display text-[14px] font-bold text-danger-600 transition-all duration-150 select-none hover:bg-danger-200 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40; }
+.btn-soft   { @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-ink-100 px-4 py-3 font-display text-[14px] font-bold text-ink-700 transition-all duration-150 select-none hover:bg-ink-200 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40; }
+.btn-teal   { @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-teal-300 to-teal-500 px-5 py-3.5 font-display text-[15px] font-bold text-white shadow-[0_10px_24px_rgba(18,164,139,0.35)] transition-all duration-150 select-none hover:brightness-105 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40; }
+
+.chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide; }
+.chip-sun    { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide bg-sun-100 text-sun-700; }
+.chip-sky    { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide bg-sky-100 text-sky-600; }
+.chip-teal   { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide bg-teal-100 text-teal-600; }
+.chip-grape  { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide bg-grape-100 text-grape-600; }
+.chip-coral  { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide bg-coral-100 text-coral-600; }
+.chip-ok     { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide bg-ok-100 text-ok-600; }
+.chip-warn   { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide bg-warn-100 text-warn-600; }
+.chip-danger { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide bg-danger-100 text-danger-600; }
+.chip-ink    { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide bg-ink-100 text-ink-600; }
+
+.grad-morning { background: linear-gradient(135deg, #ff9d2e 0%, #f07300 55%, #d95f00 100%); }
+.grad-night   { background: linear-gradient(135deg, #2c4a8f 0%, #1f3a78 55%, #172a59 100%); }
+
+/* ---- motion ---- */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popIn { 0% { opacity: 0; transform: scale(0.7); } 70% { transform: scale(1.06); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes popBig { 0% { opacity: 0; transform: scale(0.4); } 60% { transform: scale(1.12); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-7px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(3px); } }
+@keyframes spin360 { to { transform: rotate(360deg); } }
+@keyframes scanY { 0% { top: 8%; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { top: 92%; opacity: 0; } }
+@keyframes barGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes barGrowX { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes burstDot { from { transform: translate(0, 0) scale(1); opacity: 1; } to { transform: translate(var(--tx), var(--ty)) scale(0.2); opacity: 0; } }
+@keyframes burstRing { from { transform: scale(0.4); opacity: 0.9; } to { transform: scale(2.1); opacity: 0; } }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-14px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes pulseRing { 0% { transform: scale(0.6); opacity: 0.9; } 100% { transform: scale(2.4); opacity: 0; } }
+
+.anim-fade-up { animation: fadeUp 0.38s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-fade-in { animation: fadeIn 0.3s ease both; }
+.anim-pop { animation: popIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-pop-big { animation: popBig 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-blink { animation: blink 1.6s ease-in-out infinite; }
+.anim-shake { animation: shake 0.45s ease both; }
+.spin-slow { animation: spin360 26s linear infinite; }
+.view-enter { animation: fadeUp 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.bar-grow { transform-origin: bottom center; animation: barGrow 0.7s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.bar-grow-x { transform-origin: left center; animation: barGrowX 0.7s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.toast-in { animation: toastIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+.scan-line {
+  position: absolute; left: 10%; right: 10%; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 157, 46, 0.9), transparent);
+  box-shadow: 0 0 12px rgba(255, 157, 46, 0.55);
+  animation: scanY 2.8s ease-in-out infinite;
+}
+
+.burst-dot { animation: burstDot 0.85s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.burst-ring { animation: burstRing 0.7s ease-out both; }
+.radar-sweep { animation: sweep 5.5s linear infinite; transform-origin: 50% 50%; }
+.radar-pulse { animation: pulseRing 2s ease-out infinite; transform-origin: 50% 50%; }
+
+/* ------------------------- leaflet map markers ------------------------- */
+.leaflet-container { font-family: var(--font-body); border-radius: inherit; background: #dde4ef; }
+.leaflet-control-attribution { font-size: 9px !important; opacity: 0.75; }
+.hq-pin {
+  position: relative; width: 22px; height: 22px; border-radius: 9999px;
+  background: linear-gradient(135deg, var(--color-sun-400), var(--color-sun-600));
+  border: 3px solid #fff; box-shadow: 0 6px 16px rgba(240, 115, 0, 0.5);
+}
+.hq-pin::after { content: ""; position: absolute; inset: 5px; border-radius: 9999px; background: #fff; }
+.hq-pin::before {
+  content: ""; position: absolute; inset: -4px; border-radius: 9999px;
+  border: 2px solid rgba(240, 115, 0, 0.55); animation: pulseRing 2s ease-out infinite;
+}
+.radius-handle {
+  width: 20px; height: 20px; border-radius: 9999px;
+  background: #fff; border: 4px solid var(--color-sun-500);
+  box-shadow: 0 3px 12px rgba(23, 42, 89, 0.35); cursor: grab;
+}
+.radius-handle:active { cursor: grabbing; transform: scale(1.15); }
+.map-dot { border-radius: 9999px; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(16, 24, 38, 0.4); }
+.live-dot {
+  width: 14px; height: 14px; border-radius: 9999px;
+  background: var(--color-sky-500); border: 3px solid #fff;
+  box-shadow: 0 3px 10px rgba(43, 159, 224, 0.55);
+}
+
+input[type="range"] { accent-color: var(--color-sun-500); height: 26px; cursor: pointer; }
+input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.45); }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--color-ink-200); border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+.pb-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px); }
+.nav-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); }
+
+.field-wrap { position: relative; }
+.field-wrap > svg.field-ico {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  color: var(--color-ink-300); pointer-events: none;
+}
+.field-wrap > input { padding-left: 42px; padding-right: 42px; }
+.field-eye {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; height: 32px; width: 32px;
+  border-radius: 10px; color: var(--color-ink-400); cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.field-eye:hover { background: var(--color-ink-50); color: var(--color-ink-700); }
+
+.ring-dots {
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--color-sun-500) 35%, transparent) 1.2px, transparent 1.3px);
+  background-size: 12px 12px;
+}
+
+@media print {
+  body { background: #fff !important; }
+  body * { visibility: hidden; }
+  .slip-print, .slip-print * { visibility: visible; }
+  .slip-print { position: fixed; inset: 0; z-index: 9999; overflow: visible; padding: 18px; background: #fff; }
+}
