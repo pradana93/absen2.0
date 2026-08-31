@@ -11,7 +11,7 @@ import { formatMeters } from "../lib/geoUtils";
 import { wibClock, wibShortDate } from "../lib/format";
 import { useToast } from "../components/Toast";
 import {
-  IconArrowRight, IconClock, IconEye, IconEyeOff, IconFace, IconLock, IconLogo, IconMail, IconPin, IconShield,
+  IconArrowRight, IconClock, IconEye, IconEyeOff, IconFace, IconLock, IconLogo, IconMail, IconPin, IconRefresh, IconShield,
 } from "../components/icons";
 
 function LiveClockPill() {
@@ -30,7 +30,7 @@ function LiveClockPill() {
 }
 
 export default function LoginView() {
-  const { company, sites, activeSite, login, importIdentity, requestReset, consumeReset, resetPassword } = useApp();
+  const { company, sites, activeSite, login, importIdentity, requestReset, consumeReset, resetPassword, smtp, deliverResetEmail } = useApp();
   const toast = useToast();
 
   /* remembered site → start straight on credentials for a fast return visit */
@@ -81,6 +81,7 @@ export default function LoginView() {
 
   /* ------------------------- forgot password flow ------------------------- */
   const [fpMode, setFpMode] = useState<null | "request" | "inbox" | "reset">(null);
+  const [fpSentVia, setFpSentVia] = useState<"smtp" | "demo">("demo");
   const [fpEmail, setFpEmail] = useState("");
   const [fpToken, setFpToken] = useState("");
   const [fpName, setFpName] = useState("");
@@ -109,18 +110,26 @@ export default function LoginView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const submitForgot = () => {
+  const submitForgot = async () => {
     if (!fpEmail.trim()) return setFpErr("Isi email terdaftar Anda.");
     setFpBusy(true);
     setFpErr("");
-    window.setTimeout(() => {
-      const res = requestReset(fpEmail);
+    await new Promise((r) => setTimeout(r, 600));
+    const res = requestReset(fpEmail);
+    if (!res.ok || !res.token) {
       setFpBusy(false);
-      if (!res.ok || !res.token) return setFpErr(res.error ?? "Gagal mengirim tautan.");
-      setFpToken(res.token.token);
-      setFpMode("inbox");
-      toast.push("info", "Tautan reset dikirim", `Ke ${fpEmail.trim()} (simulasi inbox).`);
-    }, 700);
+      return setFpErr(res.error ?? "Gagal mengirim tautan.");
+    }
+    const token = res.token.token;
+    setFpToken(token);
+    const link = `${window.location.origin}${window.location.pathname}#reset=${token}`;
+    /* real Gmail/SMTP delivery when the Super Admin configured it — demo inbox otherwise */
+    const via = smtp.enabled ? await deliverResetEmail(fpEmail.trim(), res.name ?? "Rekan", link) : "demo";
+    setFpBusy(false);
+    setFpSentVia(via);
+    setFpMode("inbox");
+    if (via === "smtp") toast.push("ok", "Email reset terkirim", `Cek kotak masuk ${fpEmail.trim()} (serta folder Spam).`);
+    else toast.push("info", "Tautan reset siap", "SMTP belum aktif — tautan ditampilkan di inbox simulasi.");
   };
 
   const openResetLink = () => {
@@ -283,10 +292,50 @@ export default function LoginView() {
                 </div>
               )}
 
-              {fpMode === "inbox" && (
+              {fpMode === "inbox" && fpSentVia === "smtp" && (
+                <div className="anim-fade-up mt-2 space-y-3.5">
+                  <div className="overflow-hidden rounded-2xl border border-ok-300 bg-ok-100/60 shadow-[0_16px_40px_rgba(21,154,109,0.15)]">
+                    <div className="flex items-center gap-3 px-4 py-4">
+                      <span className="relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-ok-500 to-teal-600 text-white shadow-[0_10px_24px_rgba(21,154,109,0.4)]">
+                        <span className="halo-pulse absolute inset-0 rounded-2xl bg-ok-500/50" aria-hidden />
+                        <IconMail size={22} className="relative" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-display text-[16px] leading-tight font-extrabold text-ink-900">Email terkirim ✉️</p>
+                        <p className="text-[11.5px] font-bold text-ink-500">via {smtp.user || "SMTP"}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2 border-t border-ok-300/60 bg-white/70 px-4 py-3.5">
+                      <p className="text-[12px] leading-relaxed font-semibold text-ink-600">
+                        Tautan reset meluncur ke <b className="text-ink-900">{fpEmail}</b>. Periksa kotak masuk — dan folder <b>Spam/Promosi</b> jika belum terlihat.
+                      </p>
+                      <ul className="space-y-1 text-[11px] font-semibold text-ink-400">
+                        <li>• Berlaku 30 menit & sekali pakai</li>
+                        <li>• Tautan membuka halaman pengaturan sandi baru</li>
+                      </ul>
+                    </div>
+                  </div>
+                  {fpErr && <p className="rounded-xl bg-danger-100 px-3.5 py-2.5 text-[12.5px] font-bold text-danger-600">{fpErr}</p>}
+                  <div className="flex gap-2">
+                    <button className="btn-ghost flex-1 !py-2.5 !text-[12.5px]" onClick={() => void submitForgot()} disabled={fpBusy}>
+                      <IconRefresh size={13} /> {fpBusy ? "Mengirim…" : "Kirim Ulang"}
+                    </button>
+                    <button className="btn-ghost flex-1 !py-2.5 !text-[12.5px]" onClick={() => setFpSentVia("demo")}>
+                      <IconEye size={13} /> Buka Inbox Simulasi
+                    </button>
+                  </div>
+                  <button className="w-full cursor-pointer text-center text-[12px] font-extrabold text-ink-400 underline decoration-dotted underline-offset-4 hover:text-sun-600" onClick={() => { setFpMode(null); setFpErr(""); }}>
+                    Kembali ke login
+                  </button>
+                </div>
+              )}
+
+              {fpMode === "inbox" && fpSentVia === "demo" && (
                 <div className="anim-fade-up mt-2 space-y-3.5">
                   <p className="text-[12px] leading-relaxed font-semibold text-ink-400">
-                    Tautan terkirim ke <b className="text-ink-700">{fpEmail}</b>. Karena build ini belum terhubung ke server email, inbox-nya disimulasikan di bawah — di produksi, email sungguhan yang tiba.
+                    Tautan terkirim ke <b className="text-ink-700">{fpEmail}</b>. {smtp.enabled
+                      ? "SMTP aktif namun pengiriman gagal — tautan ditampilkan di inbox simulasi di bawah."
+                      : "SMTP belum diaktifkan oleh Super Admin (Master Data → Email & SMTP), jadi inbox-nya disimulasikan di bawah."}
                   </p>
                   <div className="overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-[0_16px_40px_rgba(23,42,89,0.12)]">
                     <div className="flex items-center gap-2 border-b border-ink-100 bg-ink-50 px-3.5 py-2">

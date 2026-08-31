@@ -9,15 +9,15 @@ import { useMemo, useRef, useState } from "react";
 import { useApp } from "../lib/store";
 import {
   BRAND_PRESETS, DATA_VERSION, downloadTextFile, Employee, LEAVE_TYPES, LeaveType,
-  MasterPayload, readCrashLog, ROLE_LABEL, Role, SalaryStructure, Shift, Site, SITE_STYLE, SiteColor,
+  MasterPayload, readCrashLog, ROLE_LABEL, Role, SalaryStructure, Shift, Site, SITE_STYLE, SiteColor, smtpEnvBlock,
 } from "../lib/database";
 import { uid } from "../lib/format";
 import GeofenceMap, { GeoDraft } from "../components/GeofenceMap";
 import { useToast } from "../components/Toast";
-import { Banner, Chip, Modal, SectionLabel } from "../components/bits";
+import { Banner, Chip, Modal, SectionLabel, Toggle } from "../components/bits";
 import {
   IconBriefcase, IconBuilding, IconCheck, IconClock, IconDatabase, IconDownload,
-  IconEdit, IconLock, IconPlus, IconShield, IconTrash, IconUsers, IconWallet, IconX,
+  IconEdit, IconEye, IconEyeOff, IconLock, IconMail, IconPlus, IconRefresh, IconShield, IconTrash, IconUsers, IconWallet, IconX,
 } from "../components/icons";
 
 /* ------------------------------ csv helpers ------------------------------ */
@@ -43,7 +43,7 @@ function checksum(s: string): string {
   return (h1.toString(16).padStart(8, "0") + h2.toString(16).padStart(8, "0")).slice(0, 12);
 }
 
-type Domain = "tenant" | "sites" | "employees" | "departments" | "shifts" | "reference";
+type Domain = "tenant" | "sites" | "employees" | "departments" | "shifts" | "reference" | "email";
 
 const SHIFT_COLORS: SiteColor[] = ["sun", "sky", "teal", "grape", "coral"];
 
@@ -56,7 +56,7 @@ export default function MasterDataView() {
     updateEmployee, unbindDevice,
     addDepartment, renameDepartment, removeDepartment,
     updateLeaveQuota, updateSalaryDefault, addShift, updateShift, removeShift,
-    importMasterData, audit,
+    importMasterData, audit, smtp, updateSmtp, sendTestEmail,
   } = app;
   const toast = useToast();
   const me = session!;
@@ -65,6 +65,11 @@ export default function MasterDataView() {
   if (me.role !== "superadmin") return <LockedVault />;
 
   const [open, setOpen] = useState<Domain | null>("tenant");
+
+  /* SMTP console */
+  const [smtpPassVisible, setSmtpPassVisible] = useState(false);
+  const [smtpTestTo, setSmtpTestTo] = useState("");
+  const [smtpTestBusy, setSmtpTestBusy] = useState(false);
 
   /* ------------------------------ site modal ------------------------------ */
   const [siteModal, setSiteModal] = useState<{ mode: "add" | "edit"; site?: Site } | null>(null);
@@ -212,6 +217,7 @@ export default function MasterDataView() {
     { id: "departments", icon: <IconBriefcase size={18} />, title: "Departemen", desc: "Unit kerja", count: departments.length, tint: "bg-coral-100 text-coral-600" },
     { id: "shifts", icon: <IconClock size={18} />, title: "Definisi Shift", desc: "Jam kerja & grace period", count: shifts.length, tint: "bg-teal-100 text-teal-600" },
     { id: "reference", icon: <IconWallet size={18} />, title: "Tabel Referensi", desc: "Kuota cuti & gaji default", count: LEAVE_TYPES.length + ROLE_KEYS.length, tint: "bg-warn-100 text-warn-600" },
+    { id: "email", icon: <IconMail size={18} />, title: "Email & SMTP", desc: "Reset sandi via Gmail", count: smtp.enabled ? 1 : 0, tint: "bg-danger-100 text-danger-600" },
   ];
 
   return (
@@ -501,6 +507,127 @@ export default function MasterDataView() {
               })}
             </div>
           </div>
+        </section>
+      )}
+
+      {/* ------------------------------- EMAIL/SMTP --------------------------- */}
+      {open === "email" && (
+        <section className="card anim-fade-up space-y-4 p-4">
+          <SectionLabel
+            right={
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-extrabold ${
+                  smtp.enabled && smtp.user && smtp.pass ? "bg-ok-100 text-ok-600" : "bg-warn-100 text-warn-600"
+                }`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${smtp.enabled && smtp.user && smtp.pass ? "anim-blink bg-ok-500" : "bg-warn-500"}`} />
+                  {smtp.enabled && smtp.user && smtp.pass ? "SIAP KIRIM" : "BELUM LENGKAP"}
+                </span>
+                <Toggle checked={smtp.enabled} onChange={(v) => { updateSmtp({ enabled: v }); audit("SMTP_TOGGLE", "smtp", v ? "SMTP diaktifkan" : "SMTP dinonaktifkan"); toast.push("info", `SMTP ${v ? "aktif" : "nonaktif"}`); }} />
+              </div>
+            }
+          >
+            <span className="inline-flex items-center gap-1.5"><IconMail size={16} /> Email & SMTP (Gmail)</span>
+          </SectionLabel>
+
+          <p className="rounded-xl bg-sky-100/70 px-3 py-2.5 text-[11.5px] leading-relaxed font-semibold text-sky-600">
+            Pengiriman dilakukan oleh <b>Netlify Function</b> di server — kata sandi tidak pernah dijalankan di browser karyawan.
+            Jika fungsi belum ter-deploy atau SMTP mati, aplikasi otomatis kembali ke <b>inbox simulasi</b>.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="label">Server SMTP</label>
+              <div className="grid grid-cols-[1fr_86px] gap-2">
+                <input className="input !py-2.5 font-mono text-sm" value={smtp.host} onChange={(e) => updateSmtp({ host: e.target.value })} placeholder="smtp.gmail.com" />
+                <input type="number" className="input !py-2.5 font-mono text-sm" value={smtp.port} onChange={(e) => updateSmtp({ port: Math.max(1, Number(e.target.value)) })} />
+              </div>
+            </div>
+            <div>
+              <label className="label">Keamanan</label>
+              <select className="input !py-2.5 text-sm" value={smtp.secure ? "ssl" : "tls"} onChange={(e) => updateSmtp({ secure: e.target.value === "ssl", port: e.target.value === "ssl" ? 465 : 587 })}>
+                <option value="ssl">SSL · 465</option>
+                <option value="tls">STARTTLS · 587</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Nama Pengirim</label>
+              <input className="input !py-2.5 text-sm" value={smtp.fromName} onChange={(e) => updateSmtp({ fromName: e.target.value })} placeholder="Vittoria HR" />
+            </div>
+            <div className="col-span-2">
+              <label className="label">Akun Gmail (username)</label>
+              <input className="input !py-2.5 font-mono text-sm" value={smtp.user} onChange={(e) => updateSmtp({ user: e.target.value })} placeholder="absensi.vittoria@gmail.com" autoComplete="off" />
+            </div>
+            <div className="col-span-2">
+              <label className="label">App Password Gmail (16 karakter)</label>
+              <div className="relative">
+                <input
+                  type={smtpPassVisible ? "text" : "password"}
+                  className="input !py-2.5 pr-11 font-mono text-sm tracking-widest"
+                  value={smtp.pass}
+                  onChange={(e) => updateSmtp({ pass: e.target.value.replace(/\s/g, "") })}
+                  placeholder="xxxx xxxx xxxx xxxx"
+                  autoComplete="off"
+                />
+                <button className="field-eye" onClick={() => setSmtpPassVisible((s) => !s)} aria-label="Tampilkan sandi">
+                  {smtpPassVisible ? <IconEyeOff size={15} /> : <IconEye size={15} />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Gmail app password guide */}
+          <details className="rounded-xl border border-warn-200 bg-warn-100/50 px-3 py-2.5">
+            <summary className="cursor-pointer text-[12px] font-extrabold text-warn-600 select-none">📌 Cara membuat Gmail App Password (wajib sejak 2022)</summary>
+            <ol className="mt-2 list-decimal space-y-1 pl-4 text-[11px] leading-relaxed font-semibold text-warn-600/90">
+              <li>Aktifkan <b>2-Step Verification</b> di Google Account → Security.</li>
+              <li>Buka <b>App passwords</b> → pilih app “Mail”, device “Other (Vittoria HR)”.</li>
+              <li>Google memberi sandi 16 karakter — tempel di atas (spasi boleh, otomatis dibersihkan).</li>
+              <li>Sandi Gmail biasa <b>ditolak</b> oleh server — hanya App Password yang bekerja.</li>
+            </ol>
+          </details>
+
+          {/* test + env copy */}
+          <div className="space-y-2.5 rounded-2xl bg-ink-50 p-3.5">
+            <label className="label !mb-1">Uji koneksi — kirim email tes</label>
+            <div className="flex gap-2">
+              <input type="email" className="input !py-2.5 text-sm" value={smtpTestTo} onChange={(e) => setSmtpTestTo(e.target.value)} placeholder={smtp.user || "tujuan@tes.com"} />
+              <button
+                className="btn-sun shrink-0 !rounded-xl !px-4 !py-2.5 !text-[12.5px]"
+                disabled={smtpTestBusy || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(smtpTestTo)}
+                onClick={async () => {
+                  setSmtpTestBusy(true);
+                  const res = await sendTestEmail(smtpTestTo.trim());
+                  setSmtpTestBusy(false);
+                  if (res.ok) toast.push("ok", "Email tes terkirim 🎉", `Cek ${smtpTestTo.trim()} — server SMTP terhubung.`);
+                  else toast.push("danger", "Email tes gagal", res.error);
+                }}
+              >
+                {smtpTestBusy ? <IconRefresh size={14} className="animate-spin" /> : <IconMail size={14} />} {smtpTestBusy ? "Mengirim…" : "Kirim Tes"}
+              </button>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-[10px] leading-relaxed font-bold text-ink-400">
+                <b className="text-ink-600">Praktik terbaik produksi:</b> pindahkan kredensial ke environment variables Netlify
+                (Site settings → Environment) agar tidak tersimpan di perangkat ini. Fungsi membaca env terlebih dahulu.
+              </p>
+              <button
+                className="btn-ghost shrink-0 !rounded-xl !px-3 !py-2 !text-[11px]"
+                onClick={() => {
+                  navigator.clipboard?.writeText(smtpEnvBlock(smtp)).catch(() => undefined);
+                  toast.push("ok", "Env vars disalin", "Tempel di Netlify → Site settings → Environment variables.");
+                }}
+              >
+                <IconDownload size={12} /> Salin Env Vars
+              </button>
+            </div>
+          </div>
+
+          <button
+            className="btn-sun w-full"
+            onClick={() => { audit("SMTP_UPDATE", "smtp", `Konfigurasi SMTP disimpan (${smtp.host}:${smtp.port} · ${smtp.user || "tanpa user"})`); toast.push("ok", "Konfigurasi SMTP disimpan", smtp.enabled ? "Reset kata sandi kini dikirim via email." : "SMTP masih nonaktif — nyalakan toggle di atas."); }}
+          >
+            <IconCheck size={16} /> Simpan Konfigurasi
+          </button>
         </section>
       )}
 

@@ -324,7 +324,7 @@ export function readCrashLog(): { ts: number; msg: string } | null {
 }
 
 export function clearAll() {
-  ["employees", "logs", "settings", "seeded", "company", "shifts", "leaves", "breaks", "audit", "notifs", "session", "payslips", "org", "sites", "sitechoice", "board", "departments", "quotas", "salarydefaults", "resets"].forEach((k) =>
+  ["employees", "logs", "settings", "seeded", "company", "shifts", "leaves", "breaks", "audit", "notifs", "session", "payslips", "org", "sites", "sitechoice", "board", "departments", "quotas", "salarydefaults", "resets", "smtp"].forEach((k) =>
     localStorage.removeItem(NS + k),
   );
 }
@@ -423,6 +423,8 @@ export const db = {
   loadQuotas: () => load<Record<LeaveType, number>>("quotas", { ...LEAVE_QUOTAS }),
   saveQuotas: (v: Record<LeaveType, number>) => save("quotas", v),
   loadSalaryDefaults: () => load<Record<Role, SalaryStructure>>("salarydefaults", JSON.parse(JSON.stringify(SEED_SALARY))),
+  loadSmtp: () => ({ ...DEFAULT_SMTP, ...load<Partial<SmtpConfig>>("smtp", {}) }),
+  saveSmtp: (v: SmtpConfig) => save("smtp", v),
   saveSalaryDefaults: (v: Record<Role, SalaryStructure>) => save("salarydefaults", v),
   loadResets: () => load<ResetToken[]>("resets", []),
   saveResets: (v: ResetToken[]) => save("resets", v),
@@ -707,6 +709,39 @@ export function seedBoardPosts(): BoardPost[] {
       createdBy: "Budi Hartono", createdAt: Date.now() - 26 * 3600_000, acks: ["VTR-001", "VTR-005"],
     },
   ];
+}
+
+/* ------------------------------ SMTP config ------------------------------ */
+export interface SmtpConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean; // true = SSL (465), false = STARTTLS (587)
+  user: string;    // full email address (Gmail: you@gmail.com)
+  pass: string;    // Gmail: use a 16-char App Password, NOT your regular password
+  fromName: string;
+}
+
+export const DEFAULT_SMTP: SmtpConfig = {
+  enabled: false,
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
+  user: "",
+  pass: "",
+  fromName: "Vittoria HR",
+};
+
+/** Shape for the Super Admin's "Copy Netlify env vars" action. */
+export function smtpEnvBlock(c: SmtpConfig): string {
+  return [
+    `SMTP_HOST=${c.host}`,
+    `SMTP_PORT=${c.port}`,
+    `SMTP_SECURE=${c.secure}`,
+    `SMTP_USER=${c.user}`,
+    `SMTP_PASS=${c.pass}`,
+    `SMTP_FROM_NAME=${c.fromName}`,
+  ].join("\n");
 }
 
 /* ------------------------- tenant identity codec ------------------------- */

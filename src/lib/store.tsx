@@ -8,7 +8,7 @@ import {
   applyBrand, AttendanceLog, AuditLog, BoardPost, BreakRec, clearAll, Company, db, Employee, ensureFreshVersion,
   KEY_COMPANY, KEY_SITES, LeaveRequest, LeaveType, MasterPayload, Notif, OrgNode, Payslip, ResetToken, Role, SalaryStructure, seedAudit, seedCompany,
   seedBoardPosts, seedEmployees, seedLeaves, seedLogs, seedNotifs, seedOrgNodes, seedShifts, seedSites, Settings, Shift,
-  Site, TenantIdentity,
+  Site, SmtpConfig, TenantIdentity,
 } from "./database";
 import { uid } from "./format";
 import { evaluateFence, FenceVerdict, GeoReading } from "./geoUtils";
@@ -76,9 +76,15 @@ interface AppState {
   updateSalaryDefault: (r: Role, patch: Partial<SalaryStructure>) => void;
   importMasterData: (payload: MasterPayload) => string[];
   /* forgot password */
-  requestReset: (email: string) => { ok: boolean; error?: string; token?: ResetToken };
+  requestReset: (email: string) => { ok: boolean; error?: string; token?: ResetToken; name?: string };
   consumeReset: (token: string) => { ok: boolean; error?: string; name?: string };
   resetPassword: (token: string, newPass: string) => { ok: boolean; error?: string };
+  /* SMTP — real email via the Netlify function */
+  smtp: SmtpConfig;
+  updateSmtp: (patch: Partial<SmtpConfig>) => void;
+  /** Returns "smtp" when sent via the mail server, "demo" when the in-app inbox fallback was used. */
+  deliverResetEmail: (to: string, name: string, link: string) => Promise<"smtp" | "demo">;
+  sendTestEmail: (to: string) => Promise<{ ok: boolean; error?: string }>;
   addShift: (s: Shift) => void;
   updateShift: (id: string, patch: Partial<Shift>) => void;
   removeShift: (id: string) => void;
@@ -637,11 +643,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [leaveQuotas, setLeaveQuotas] = useState<Record<LeaveType, number>>(() => db.loadQuotas());
   const [salaryDefaults, setSalaryDefaults] = useState<Record<Role, SalaryStructure>>(() => db.loadSalaryDefaults());
   const [resets, setResets] = useState<ResetToken[]>(() => db.loadResets());
+  const [smtp, setSmtp] = useState<SmtpConfig>(() => db.loadSmtp());
+  const smtpRef = useRef(smtp); smtpRef.current = smtp;
 
   useEffect(() => db.saveDepartments(departments), [departments]);
   useEffect(() => db.saveQuotas(leaveQuotas), [leaveQuotas]);
   useEffect(() => db.saveSalaryDefaults(salaryDefaults), [salaryDefaults]);
   useEffect(() => db.saveResets(resets), [resets]);
+  useEffect(() => db.saveSmtp(smtp), [smtp]);
 
   const departmentsRef = useRef(departments); departmentsRef.current = departments;
   const shiftsRef = useRef(shifts); shiftsRef.current = shifts;
@@ -715,7 +724,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [masterAudit]);
 
   /* ----------------------------- forgot password --------------------------- */
-  const requestReset = useCallback((email: string): { ok: boolean; error?: string; token?: ResetToken } => {
+  const requestReset = useCallback((email: string): { ok: boolean; error?: string; token?: ResetToken; name?: string } => {
     const key = email.trim().toLowerCase();
     const emp = employeesRef.current.find((e) => e.email.toLowerCase() === key);
     if (!emp) return { ok: false, error: "Email tidak terdaftar di direktori karyawan." };
@@ -731,7 +740,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       id: uid("aud"), ts: Date.now(), actorId: emp.staffId, actorName: emp.name, role: emp.role,
       action: "PASSWORD_RESET_REQUEST", target: emp.staffId, detail: "Tautan reset kata sandi diminta (berlaku 30 menit)",
     }, ...prev]);
-    return { ok: true, token };
+    return { ok: true, token, name: emp.name };
   }, [resets]);
 
   const consumeReset = useCallback((token: string): { ok: boolean; error?: string; name?: string } => {
@@ -756,6 +765,104 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, ...prev]);
     return { ok: true };
   }, [resets]);
+
+  /* --------------------------------- SMTP --------------------------------- */
+  const updateSmtp = useCallback((patch: Partial<SmtpConfig>) => setSmtp((prev) => ({ ...prev, ...patch })), []);
+
+  /** POST to the Netlify function; false on any failure (timeout, 4xx, 5xx, offline). */
+  const postMail = useCallback(async (to: string, subject: string, html: string, text: string): Promise<{ ok: boolean; error?: string }> => {
+    const cfg = smtpRef.current;
+    if (!cfg.enabled || !cfg.user || !cfg.pass) return { ok: false, error: "SMTP belum dikonfigurasi." };
+    try {
+      const ctl = new AbortController();
+      const t = window.setTimeout(() => ctl.abort(), 12_000);
+      const res = await fetch("/.netlify/functions/send-mail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to, subject, html, text,
+          config: { host: cfg.host, port: cfg.port, secure: cfg.secure, user: cfg.user, pass: cfg.pass, fromName: cfg.fromName },
+        }),
+        signal: ctl.signal,
+      });
+      window.clearTimeout(t);
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        return { ok: false, error: j?.error ?? `Fungsi email gagal (HTTP ${res.status}).` };
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "Fungsi email tidak terjangkau — deploy ulang agar Netlify Function aktif." };
+    }
+  }, []);
+
+  /** Deliver the password-reset email — real SMTP when available, in-app inbox otherwise. */
+  const deliverResetEmail = useCallback(async (to: string, name: string, link: string): Promise<"smtp" | "demo"> => {
+    const appName = companyRef.current.appName ?? "Vittoria HR";
+    const subject = `Reset Kata Sandi — ${appName}`;
+    const html = `<!doctype html>
+<html><body style="margin:0;padding:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;padding:32px 16px;">
+    <div style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(23,42,89,0.08);">
+      <div style="background:linear-gradient(135deg,#ff9d2e,#f07300);padding:28px 28px 24px;">
+        <div style="width:44px;height:44px;border-radius:12px;background:#ffffff;color:#f07300;font-weight:800;font-size:22px;line-height:44px;text-align:center;">V</div>
+        <h1 style="margin:14px 0 4px;color:#ffffff;font-size:20px;">Reset Kata Sandi</h1>
+        <p style="margin:0;color:rgba(255,255,255,0.85);font-size:13px;">${appName}</p>
+      </div>
+      <div style="padding:28px;">
+        <p style="margin:0 0 12px;color:#172a59;font-size:15px;">Halo <b>${name}</b>,</p>
+        <p style="margin:0 0 20px;color:#5b6b8c;font-size:14px;line-height:1.6;">
+          Kami menerima permintaan reset kata sandi untuk akun Anda. Klik tombol di bawah untuk membuat kata sandi baru.
+        </p>
+        <div style="text-align:center;margin:0 0 22px;">
+          <a href="${link}" style="display:inline-block;background:linear-gradient(135deg,#ff9d2e,#f07300);color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 34px;border-radius:12px;">Buat Kata Sandi Baru</a>
+        </div>
+        <p style="margin:0 0 6px;color:#8494b5;font-size:12px;">Atau salin tautan ini ke browser:</p>
+        <p style="margin:0 0 18px;word-break:break-all;color:#f07300;font-size:12px;">${link}</p>
+        <div style="background:#fdf1d7;border-radius:10px;padding:12px 14px;">
+          <p style="margin:0;color:#bd7a06;font-size:12px;line-height:1.5;">⏱ Tautan berlaku <b>30 menit</b> dan hanya bisa dipakai <b>satu kali</b>. Jika Anda tidak memintanya, abaikan email ini — akun Anda tetap aman.</p>
+        </div>
+      </div>
+      <div style="background:#f0f3fa;padding:16px 28px;text-align:center;">
+        <p style="margin:0;color:#8494b5;font-size:11px;">Email otomatis dari ${appName} · Sistem Absensi & HRIS Gudang</p>
+      </div>
+    </div>
+  </div>
+</body></html>`;
+    const text = `Halo ${name},\n\nReset kata sandi ${appName}: ${link}\n\nBerlaku 30 menit, sekali pakai. Abaikan jika bukan Anda.`;
+    const res = await postMail(to, subject, html, text);
+    if (res.ok) {
+      setAudits((prev) => [{
+        id: uid("aud"), ts: Date.now(), actorId: "system", actorName: "Sistem", role: "system" as const,
+        action: "AUTH_PW_RESET_SENT", target: to, detail: `Email reset dikirim via SMTP (${smtpRef.current.user})`,
+      }, ...prev]);
+      return "smtp";
+    }
+    return "demo";
+  }, [postMail]);
+
+  const sendTestEmail = useCallback(async (to: string): Promise<{ ok: boolean; error?: string }> => {
+    const appName = companyRef.current.appName ?? "Vittoria HR";
+    const res = await postMail(
+      to,
+      `Tes Email Berhasil — ${appName}`,
+      `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
+        <h2 style="color:#172a59;">✉️ Koneksi SMTP berhasil!</h2>
+        <p style="color:#5b6b8c;font-size:14px;">Server <b>${smtpRef.current.host}:${smtpRef.current.port}</b> menerima email dari <b>${smtpRef.current.user}</b>.</p>
+        <p style="color:#5b6b8c;font-size:14px;">Email reset kata sandi dan notifikasi kini akan dikirim sungguhan ke karyawan.</p>
+        <p style="color:#8494b5;font-size:12px;margin-top:20px;">— ${appName}</p>
+      </div>`,
+      `Tes email berhasil. Server ${smtpRef.current.host}:${smtpRef.current.port} terhubung. — ${appName}`,
+    );
+    const actor = sessionRef.current ? employeesRef.current.find((e) => e.staffId === sessionRef.current?.staffId) : null;
+    setAudits((prev) => [{
+      id: uid("aud"), ts: Date.now(), actorId: actor?.staffId ?? "system", actorName: actor?.name ?? "Sistem",
+      role: (actor?.role ?? "system") as AuditLog["role"],
+      action: res.ok ? "SMTP_TEST_OK" : "SMTP_TEST_FAIL", target: to,
+      detail: res.ok ? `Email tes terkirim ke ${to}` : `Email tes gagal: ${res.error}`,
+    }, ...prev]);
+    return res;
+  }, [postMail]);
 
   /* --------------------------------- shifts ------------------------------- */
   const addShift = useCallback((s: Shift) => setShifts((prev) => [...prev, s]), []);
@@ -836,6 +943,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addDepartment, renameDepartment, removeDepartment,
     updateLeaveQuota, updateSalaryDefault, importMasterData,
     requestReset, consumeReset, resetPassword,
+    smtp, updateSmtp, deliverResetEmail, sendTestEmail,
     addShift, updateShift, removeShift,
     activeBreak, startBreak, endBreak,
     markNotifsRead,

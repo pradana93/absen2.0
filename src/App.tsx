@@ -30,7 +30,7 @@ const AuditView = lazy(() => import("./views/AuditView"));
 const LiveOpsView = lazy(() => import("./views/LiveOpsView"));
 const MasterDataView = lazy(() => import("./views/MasterDataView"));
 
-export const APP_VERSION = "v6.3";
+export const APP_VERSION = "v6.4";
 import {
   IconArrowRight, IconBell, IconBriefcase, IconBuilding, IconCamera, IconClipboard, IconCpu, IconDatabase,
   IconGear, IconGrid, IconHistory, IconHome, IconLock, IconLogo, IconLogoutIn, IconShield, IconSignal, IconUsers, IconX,
