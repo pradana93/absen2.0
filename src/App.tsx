@@ -463,7 +463,7 @@ function Shell() {
 
         {/* PWA install banner (yield to the geofence warning when both apply) */}
         {installEvt && !installGone && !(fence && !fence.inside && view !== "absen") && (
-          <div className="fixed inset-x-0 bottom-24 z-30 flex justify-center px-4 print:hidden">
+          <div className="above-dock fixed inset-x-0 z-30 flex justify-center px-4 print:hidden">
             <div className={`anim-fade-up flex w-full ${SHELL_W} items-center gap-3 rounded-2xl border border-ink-100 bg-white/95 p-3 shadow-[0_18px_48px_rgba(23,42,89,0.22)] backdrop-blur`}>
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-sun-400 to-sun-600 text-white shadow-[0_8px_18px_rgba(240,115,0,0.4)]">
                 <IconGrid size={18} />
@@ -516,7 +516,7 @@ function Shell() {
         </nav>
 
         {fence && !fence.inside && view !== "absen" && (
-          <div className="pointer-events-none fixed inset-x-0 bottom-24 z-30 flex justify-center px-4">
+          <div className="above-dock pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4">
             <div className="anim-fade-up rounded-full bg-danger-500/95 px-4 py-2 text-[11.5px] font-extrabold text-white shadow-lg backdrop-blur">
               <IconShield size={12} className="mr-1 inline" /> Di luar radius gudang — absensi akan ditolak
             </div>

@@ -198,8 +198,14 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.45); }
 
 /* safe areas */
 .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
-.pb-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px); }
-.nav-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); }
+/* clearance for host overlays (e.g. Netlify free-plan "Powered by" badge ~32px) */
+:root { --dock-lift: 44px; }
+
+.pb-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px + var(--dock-lift)); }
+.nav-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px + var(--dock-lift)); }
+
+/* floating banners must hover above the lifted dock */
+.above-dock { bottom: calc(96px + var(--dock-lift)); }
 
 /* input with leading icon */
 .field-wrap { position: relative; }
