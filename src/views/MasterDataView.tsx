@@ -9,7 +9,7 @@ import { useMemo, useRef, useState } from "react";
 import { useApp } from "../lib/store";
 import {
   BRAND_PRESETS, DATA_VERSION, downloadTextFile, Employee, LEAVE_TYPES, LeaveType,
-  MasterPayload, ROLE_LABEL, Role, SalaryStructure, Shift, Site, SITE_STYLE, SiteColor,
+  MasterPayload, readCrashLog, ROLE_LABEL, Role, SalaryStructure, Shift, Site, SITE_STYLE, SiteColor,
 } from "../lib/database";
 import { uid } from "../lib/format";
 import GeofenceMap, { GeoDraft } from "../components/GeofenceMap";
@@ -523,6 +523,15 @@ export default function MasterDataView() {
         <p className="mt-2.5 text-[10.5px] leading-relaxed font-semibold text-ink-400">
           Verifikasi checksum sebelum mempercayai cadangan. Impor menggantikan koleksi master; karyawan di-<i>upsert</i> per Staff ID.
         </p>
+        {(() => {
+          const crash = readCrashLog();
+          if (!crash) return null;
+          return (
+            <p className="mt-2 rounded-xl bg-warn-100 px-3 py-2 text-[10.5px] leading-relaxed font-bold text-warn-600">
+              Crash terakhir tertangkap: {new Date(crash.ts).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} — “{crash.msg}”
+            </p>
+          );
+        })()}
       </section>
 
       {/* ------------------------------ site modal --------------------------- */}

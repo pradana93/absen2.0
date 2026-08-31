@@ -193,13 +193,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     document.title = `${company.appName ?? "Vittoria HR"} — ${company.appTagline ?? "Absensi & HRIS"}`;
   }, [company.brand, company.appName, company.appTagline]);
 
-  /* tenant sync across tabs/windows of this browser (storage events) */
+  /* Full cross-tab sync: storage events only fire in *other* tabs, so two
+     open sessions (e.g. HR + staff on one machine) never diverge. */
   useEffect(() => {
+    const sync: Array<[string, () => void]> = [
+      ["employees", () => setEmployees(db.loadEmployees())],
+      ["logs", () => setLogs(db.loadLogs())],
+      ["leaves", () => setLeaves(db.loadLeaves())],
+      ["breaks", () => setBreaks(db.loadBreaks())],
+      ["board", () => setBoard(db.loadBoard())],
+      ["org", () => setOrg(db.loadOrg())],
+      ["notifs", () => setNotifs(db.loadNotifs())],
+      ["audit", () => setAudits(db.loadAudit())],
+      ["payslips", () => setPayslips(db.loadPayslips())],
+      ["shifts", () => { const s = db.loadShifts(); if (s.length) setShifts(s); }],
+      ["departments", () => { const d = db.loadDepartments(); if (d.length) setDepartments(d); }],
+      ["quotas", () => setLeaveQuotas(db.loadQuotas())],
+      ["salarydefaults", () => setSalaryDefaults(db.loadSalaryDefaults())],
+    ];
     const onStorage = (e: StorageEvent) => {
-      if (e.key === KEY_COMPANY) setCompany(db.loadCompany());
+      if (!e.key) return;
+      if (e.key === KEY_COMPANY) { setCompany(db.loadCompany()); return; }
       if (e.key === KEY_SITES) {
         const s = db.loadSites();
         if (s.length) setSites(s);
+        return;
+      }
+      for (const [suffix, fn] of sync) {
+        if (e.key.endsWith(":" + suffix)) { fn(); return; }
       }
     };
     window.addEventListener("storage", onStorage);
