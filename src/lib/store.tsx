@@ -5,9 +5,9 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  applyBrand, AttendanceLog, AuditLog, BreakRec, clearAll, Company, db, Employee, ensureFreshVersion,
+  applyBrand, AttendanceLog, AuditLog, BoardPost, BreakRec, clearAll, Company, db, Employee, ensureFreshVersion,
   KEY_COMPANY, KEY_SITES, LeaveRequest, Notif, OrgNode, Payslip, Role, seedAudit, seedCompany,
-  seedEmployees, seedLeaves, seedLogs, seedNotifs, seedOrgNodes, seedShifts, seedSites, Settings, Shift,
+  seedBoardPosts, seedEmployees, seedLeaves, seedLogs, seedNotifs, seedOrgNodes, seedShifts, seedSites, Settings, Shift,
   Site, TenantIdentity,
 } from "./database";
 import { uid } from "./format";
@@ -33,6 +33,7 @@ interface AppState {
   shifts: Shift[];
   org: OrgNode[];
   siteOrg: OrgNode[];
+  board: BoardPost[];
   audits: AuditLog[];
   notifs: Notif[];
   settings: Settings;
@@ -61,6 +62,9 @@ interface AppState {
   addOrgNode: (n: OrgNode) => void;
   updateOrgNode: (id: string, patch: Partial<OrgNode>) => void;
   removeOrgNode: (id: string) => void;
+  postBoard: (p: { siteId: string | null; title: string; body: string; tone: BoardPost["tone"] }) => void;
+  ackBoard: (id: string) => void;
+  deleteBoard: (id: string) => void;
   addShift: (s: Shift) => void;
   updateShift: (id: string, patch: Partial<Shift>) => void;
   removeShift: (id: string) => void;
@@ -129,6 +133,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const o = db.loadOrg();
     return o.length ? o : seedOrgNodes();
   });
+  const [board, setBoard] = useState<BoardPost[]>(() => db.loadBoard());
   const [audits, setAudits] = useState<AuditLog[]>(() => db.loadAudit());
   const [notifs, setNotifs] = useState<Notif[]>(() => db.loadNotifs());
   const [settings, setSettings] = useState<Settings>(() => db.loadSettings());
@@ -151,6 +156,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const orgRef = useRef(org); orgRef.current = org;
   const failRef = useRef<Record<string, number>>({});
   const settingsRef = useRef(settings); settingsRef.current = settings;
+  const boardRef = useRef(board); boardRef.current = board;
 
   /* ------------------------------ persistence ----------------------------- */
   useEffect(() => db.saveEmployees(employees), [employees]);
@@ -160,6 +166,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => db.savePayslips(payslips), [payslips]);
   useEffect(() => db.saveShifts(shifts), [shifts]);
   useEffect(() => db.saveOrg(org), [org]);
+  useEffect(() => db.saveBoard(board), [board]);
   useEffect(() => db.saveAudit(audits), [audits]);
   useEffect(() => db.saveNotifs(notifs), [notifs]);
   useEffect(() => db.saveSettings(settings), [settings]);
@@ -535,6 +542,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  /* ------------------------------ papan pengumuman ------------------------ */
+  const postBoard = useCallback((p: { siteId: string | null; title: string; body: string; tone: BoardPost["tone"] }) => {
+    const actor = sessionRef.current ? employeesRef.current.find((e) => e.staffId === sessionRef.current?.staffId) : null;
+    const post: BoardPost = {
+      id: uid("an"), siteId: p.siteId, title: p.title.trim(), body: p.body.trim(),
+      tone: p.tone, createdBy: actor?.name ?? "Admin", createdAt: Date.now(), acks: [],
+    };
+    setBoard((prev) => [post, ...prev]);
+    /* notify every active employee whose site matches */
+    const targets = employeesRef.current.filter(
+      (e) => e.status === "active" && (e.role === "employee" || e.role === "manager") &&
+        (post.siteId === null || e.siteId === post.siteId),
+    );
+    setNotifs((prev) => [
+      ...targets.map((e) => ({
+        id: uid("ntf"), staffId: e.staffId, title: "Pengumuman baru",
+        body: post.title, tone: post.tone === "ok" ? "ok" as const : post.tone === "info" ? "info" as const : "warn" as const,
+        ts: Date.now(), read: false,
+      })),
+      ...prev,
+    ]);
+    setAudits((prev) => [{
+      id: uid("aud"), ts: Date.now(), actorId: actor?.staffId ?? "system", actorName: actor?.name ?? "Sistem",
+      role: (actor?.role ?? "system") as AuditLog["role"], action: "BOARD_POST",
+      target: post.siteId ?? "semua-area", detail: `Pengumuman "${post.title}" (${targets.length} penerima)`,
+    }, ...prev]);
+  }, []);
+
+  const ackBoard = useCallback((id: string) => {
+    const sid = sessionRef.current?.staffId;
+    if (!sid) return;
+    setBoard((prev) => prev.map((b) => (b.id === id && !b.acks.includes(sid) ? { ...b, acks: [...b.acks, sid] } : b)));
+  }, []);
+
+  const deleteBoard = useCallback((id: string) => {
+    const post = boardRef.current.find((b) => b.id === id);
+    setBoard((prev) => prev.filter((b) => b.id !== id));
+    const actor = sessionRef.current ? employeesRef.current.find((e) => e.staffId === sessionRef.current?.staffId) : null;
+    setAudits((prev) => [{
+      id: uid("aud"), ts: Date.now(), actorId: actor?.staffId ?? "system", actorName: actor?.name ?? "Sistem",
+      role: (actor?.role ?? "system") as AuditLog["role"], action: "BOARD_DELETE",
+      target: post?.siteId ?? "semua-area", detail: `Pengumuman "${post?.title ?? id}" dihapus`,
+    }, ...prev]);
+  }, []);
+
   /* --------------------------------- shifts ------------------------------- */
   const addShift = useCallback((s: Shift) => setShifts((prev) => [...prev, s]), []);
   const updateShift = useCallback(
@@ -589,6 +641,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setBreaks([]);
     setAudits(seedAudit());
     setNotifs(seedNotifs());
+    setBoard(seedBoardPosts());
     setSettings({ ...settingsRef.current });
     setSession(null);
     db.markSeeded();
@@ -608,6 +661,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addLeave, decideLeave,
     issuePayslip, withdrawPayslip,
     addOrgNode, updateOrgNode, removeOrgNode,
+    board, postBoard, ackBoard, deleteBoard,
     addShift, updateShift, removeShift,
     activeBreak, startBreak, endBreak,
     markNotifsRead,

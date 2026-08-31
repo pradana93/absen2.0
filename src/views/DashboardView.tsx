@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { NavFn } from "../App";
 import { useApp } from "../lib/store";
-import { AttendanceLog, buildCsv, downloadTextFile } from "../lib/database";
+import { AttendanceLog, buildCsv, daySummary, downloadTextFile } from "../lib/database";
 import { formatMeters } from "../lib/geoUtils";
 import { relTime, todayKey, wibDayKey, wibShortDate, wibTime } from "../lib/format";
 import Radar from "../components/Radar";
@@ -14,7 +14,7 @@ import GeofenceMap from "../components/GeofenceMap";
 import { useToast } from "../components/Toast";
 import { Chip, InitialsAvatar, SectionLabel, StatTile } from "../components/bits";
 import {
-  IconAlert, IconArrowRight, IconCheck, IconClipboard, IconClock, IconDownload, IconFile, IconPin, IconPlus, IconUsers, IconX,
+  IconAlert, IconArrowRight, IconCheck, IconClipboard, IconClock, IconCpu, IconDownload, IconFile, IconFlame, IconPin, IconPlus, IconUsers, IconX,
 } from "../components/icons";
 
 function wibMinutes(ts: number): number {
@@ -104,15 +104,39 @@ function AnomalyWidget() {
 }
 
 export default function DashboardView({ nav }: { nav: NavFn }) {
-  const { employees, logs, leaves, activeSite, shifts, geo, decideLeave, audit } = useApp();
+  const { employees, logs, breaks, leaves, company: co, activeSite, shifts, geo, decideLeave, audit } = useApp();
   const toast = useToast();
-  const company = activeSite; // dashboard metrics follow the active Gudang/Area
+  // metrics follow the active Gudang/Area; holidays stay company-wide
+  const company = { ...activeSite, holidays: co.holidays };
   const [geoMode, setGeoMode] = useState<"map" | "radar">("map");
   const today = todayKey();
 
   const activeStaff = employees.filter((e) => e.status === "active" && (e.role === "employee" || e.role === "manager"));
   const staffById = useMemo(() => new Map(employees.map((e) => [e.staffId, e])), [employees]);
   const todayLogs = useMemo(() => logs.filter((l) => wibDayKey(new Date(l.ts)) === today), [logs, today]);
+
+  /* MVP Mingguan — kehadiran 7 hari, keterlambatan, dan streak per staf */
+  const mvp = useMemo(() => {
+    return activeStaff
+      .map((e) => {
+        let hadir = 0, late = 0, streak = 0;
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(); d.setDate(d.getDate() - i);
+          const s = daySummary(e.staffId, wibDayKey(d), logs, breaks, leaves, shifts, e.shiftId, company.holidays);
+          if (s.inTs) { hadir++; if (s.lateMin > 0) late++; }
+        }
+        for (let i = 0; i < 60; i++) {
+          const d = new Date(); d.setDate(d.getDate() - i);
+          const s = daySummary(e.staffId, wibDayKey(d), logs, breaks, leaves, shifts, e.shiftId, company.holidays);
+          if (i === 0 && !s.inTs) continue;
+          if (s.inTs || s.kind === "work" || s.kind === "holiday" || s.kind === "leave") streak++;
+          else break;
+        }
+        return { e, hadir, late, streak, score: hadir * 10 - late * 3 + streak * 2 };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+  }, [activeStaff, logs, breaks, leaves, shifts, company.holidays]);
 
   const kpi = useMemo(() => {
     const verifiedIn = new Map<string, AttendanceLog>();
@@ -190,6 +214,27 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
 
       <OpsTicker />
 
+      {/* Ruang Kendali launcher */}
+      <button
+        onClick={() => nav("kendali")}
+        className="ops-bg group relative w-full cursor-pointer overflow-hidden rounded-3xl p-4 text-left transition-transform duration-150 active:scale-[0.985]"
+      >
+        <span className="scan-line" />
+        <div className="relative flex items-center gap-3.5">
+          <span className="relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-sun-400 to-sun-600 text-white shadow-[0_10px_24px_rgba(240,115,0,0.45)]">
+            <span className="absolute inset-0 rounded-2xl bg-white/25 halo-pulse" />
+            <IconCpu size={22} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-display text-[16px] leading-tight font-extrabold tracking-wide text-white">RUANG KENDALI</p>
+            <p className="text-[11px] font-bold text-slate-400">Papan live gudang — jam WIB, status staf & arus aktivitas</p>
+          </div>
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-300 transition group-hover:translate-x-0.5 group-hover:bg-white/10 group-hover:text-white">
+            <IconArrowRight size={16} />
+          </span>
+        </div>
+      </button>
+
       <div className="grid grid-cols-4 gap-2.5">
         <StatTile label="Hadir" value={kpi.hadir} tone="ok" sub={`dari ${activeStaff.length}`} />
         <StatTile label="Telat" value={kpi.late} tone="warn" sub="hari ini" />
@@ -202,6 +247,36 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
           <p className="text-[13px] font-bold text-sky-600">{kpi.belum} staff belum Check-In hari ini.</p>
         </div>
       )}
+
+      {/* MVP Mingguan */}
+      <section className="card overflow-hidden">
+        <div className="flex items-center justify-between border-b border-ink-100 bg-gradient-to-r from-sun-100/70 to-white px-4 py-3">
+          <p className="flex items-center gap-2 font-display text-[15px] font-extrabold text-ink-900">
+            <IconFlame size={17} className="text-sun-600" /> MVP Minggu Ini
+          </p>
+          <Chip tone="ink">7 hari · {activeSite.shortName}</Chip>
+        </div>
+        <div className="divide-y divide-ink-100/70">
+          {mvp.map((r, i) => {
+            const medal = ["bg-gradient-to-br from-amber-300 to-amber-500", "bg-gradient-to-br from-slate-300 to-slate-400", "bg-gradient-to-br from-orange-300 to-orange-500"][i];
+            return (
+              <div key={r.e.staffId} className="tile-pop flex items-center gap-3 px-4 py-3" style={{ animationDelay: `${i * 70}ms` }}>
+                <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full font-display text-[14px] font-extrabold text-white shadow ${medal}`}>{i + 1}</span>
+                <InitialsAvatar name={r.e.name} photo={r.e.photo} seedKey={r.e.staffId} size="h-10 w-10 text-[13px]" rounded="rounded-xl" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13.5px] font-extrabold text-ink-900">{r.e.name}</p>
+                  <p className="text-[10.5px] font-bold text-ink-400">{r.e.position} · {r.e.department}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <span className="chip-ok !px-2 !py-1 !text-[9.5px]">{r.hadir}/7 hadir</span>
+                  {r.streak > 1 && <span className="chip-coral !px-2 !py-1 !text-[9.5px]"><IconFlame size={9} /> {r.streak}</span>}
+                  {r.late > 0 && <span className="chip-warn !px-2 !py-1 !text-[9.5px]">{r.late}× telat</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       <AnomalyWidget />
 

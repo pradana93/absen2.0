@@ -25,14 +25,17 @@ import ProfileView from "./views/ProfileView";
 import SettingsView from "./views/SettingsView";
 import AuditView from "./views/AuditView";
 import OrgView from "./views/OrgView";
+import LiveOpsView from "./views/LiveOpsView";
+import PengumumanView from "./views/PengumumanView";
 import {
-  IconBell, IconBriefcase, IconBuilding, IconCamera, IconClipboard, IconCpu,
-  IconArrowRight, IconGear, IconGrid, IconHistory, IconHome, IconLogoutIn, IconShield, IconSignal, IconUsers, IconWallet, IconX,
+  IconArrowRight, IconBell, IconBriefcase, IconBuilding, IconCamera, IconClipboard, IconCpu,
+  IconGear, IconGrid, IconHistory, IconHome, IconLogoutIn, IconShield, IconSignal, IconUsers, IconX,
 } from "./components/icons";
 
 export type ViewId =
   | "home" | "dashboard" | "absen" | "riwayat" | "pengguna"
-  | "cuti" | "gaji" | "profil" | "aturan" | "audit" | "org";
+  | "cuti" | "gaji" | "profil" | "aturan" | "audit" | "org"
+  | "kendali" | "pengumuman";
 export type NavFn = (v: ViewId, type?: AttendanceType) => void;
 
 interface BIPEvent extends Event {
@@ -70,24 +73,27 @@ const DOCK: Record<Role, TabDef[]> = {
 /** The Fitur sheet — secondary modules, with live context badges. */
 const FEATURES: Record<Role, FeatureDef[]> = {
   employee: [
-    { id: "gaji", label: "Gaji", group: "Keuangan", desc: "Slip & ringkasan bulanan", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconWallet size={s} /> },
+    { id: "pengumuman", label: "Pengumuman", group: "Info", desc: "Kabar & konfirmasi tim", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconBell size={s} /> },
     { id: "org", label: "Struktur", group: "Perusahaan", desc: "Hierarki perusahaan", tint: "bg-coral-100 text-coral-600", icon: (s) => <IconBuilding size={s} /> },
     { id: "profil", label: "Profil", group: "Akun", desc: "Data diri & keamanan", tint: "bg-grape-100 text-grape-600", icon: (s) => <IconUsers size={s} /> },
   ],
   manager: [
-    { id: "gaji", label: "Gaji", group: "Keuangan", desc: "Slip & ringkasan bulanan", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconWallet size={s} /> },
+    { id: "kendali", label: "R. Kendali", group: "Operasional", desc: "Papan live gudang", tint: "bg-ink-900 text-sun-400", icon: (s) => <IconCpu size={s} /> },
+    { id: "pengumuman", label: "Pengumuman", group: "Info", desc: "Kabar & konfirmasi tim", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconBell size={s} /> },
     { id: "org", label: "Struktur", group: "Perusahaan", desc: "Hierarki tim", tint: "bg-coral-100 text-coral-600", icon: (s) => <IconBuilding size={s} /> },
     { id: "profil", label: "Profil", group: "Akun", desc: "Data diri & keamanan", tint: "bg-grape-100 text-grape-600", icon: (s) => <IconUsers size={s} /> },
   ],
   companyadmin: [
-    { id: "gaji", label: "Penggajian", group: "Operasional", desc: "Terbitkan slip bulanan", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconWallet size={s} /> },
+    { id: "kendali", label: "R. Kendali", group: "Operasional", desc: "Papan live gudang", tint: "bg-ink-900 text-sun-400", icon: (s) => <IconCpu size={s} /> },
+    { id: "pengumuman", label: "Pengumuman", group: "Info", desc: "Posting & pantau konfirmasi", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconBell size={s} /> },
     { id: "org", label: "Struktur", group: "Perusahaan", desc: "Susun hierarki", tint: "bg-coral-100 text-coral-600", icon: (s) => <IconBuilding size={s} /> },
-    { id: "aturan", label: "Aturan", group: "Perusahaan", desc: "Geofence, shift & libur", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconGear size={s} /> },
+    { id: "aturan", label: "Aturan", group: "Perusahaan", desc: "Geofence, shift & libur", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconGear size={s} /> },
   ],
   superadmin: [
-    { id: "gaji", label: "Penggajian", group: "Operasional", desc: "Terbitkan slip bulanan", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconWallet size={s} /> },
+    { id: "kendali", label: "R. Kendali", group: "Operasional", desc: "Papan live gudang", tint: "bg-ink-900 text-sun-400", icon: (s) => <IconCpu size={s} /> },
+    { id: "pengumuman", label: "Pengumuman", group: "Info", desc: "Posting & pantau konfirmasi", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconBell size={s} /> },
     { id: "org", label: "Struktur", group: "Perusahaan", desc: "Susun hierarki", tint: "bg-coral-100 text-coral-600", icon: (s) => <IconBuilding size={s} /> },
-    { id: "aturan", label: "Sistem", group: "Sistem", desc: "Branding & cadangan", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconGear size={s} /> },
+    { id: "aturan", label: "Sistem", group: "Sistem", desc: "Branding & cadangan", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconGear size={s} /> },
   ],
 };
 
@@ -233,7 +239,7 @@ function SiteSwitcher() {
 }
 
 function Shell() {
-  const { session, company, leaves, payslips, org, audits, engine, geo, fence, tokenExp, logout } = useApp();
+  const { session, company, leaves, org, board, activeSite, audits, engine, geo, fence, tokenExp, logout } = useApp();
   const toast = useToast();
   const [view, setView] = useState<ViewId>("home");
   const [initialType, setInitialType] = useState<AttendanceType>("IN");
@@ -289,10 +295,10 @@ function Shell() {
   const badgeFor = (id: ViewId): string | null => {
     if (!session) return null;
     if (id === "org") return String(org.length);
-    if (id === "gaji") {
-      const n = role === "employee" || role === "manager"
-        ? payslips.filter((p) => p.staffId === session.staffId && p.status === "issued").length
-        : payslips.filter((p) => p.month === monthNow && p.status === "issued").length;
+    if (id === "pengumuman") {
+      const n = board.filter(
+        (p) => (p.siteId === null || p.siteId === activeSite.id) && !p.acks.includes(session.staffId),
+      ).length;
       return n > 0 ? String(n) : null;
     }
     if (id === "audit") return audits.length > 99 ? "99+" : String(audits.length);
@@ -338,6 +344,11 @@ function Shell() {
   const needsFace = !session.descriptor && !session.hash;
   if (needsFace && !faceDone) {
     return <FaceEnrollGate onDone={() => setFaceDone(true)} />;
+  }
+
+  /* Ruang Kendali — full-bleed dark ops board (escapes the phone frame) */
+  if (view === "kendali") {
+    return <LiveOpsView onExit={() => nav(HOME[role])} />;
   }
 
   /* maintenance mode — admins keep access */
@@ -421,6 +432,7 @@ function Shell() {
             {view === "aturan" && <SettingsView />}
             {view === "audit" && <AuditView />}
             {view === "org" && <OrgView />}
+            {view === "pengumuman" && <PengumumanView />}
           </div>
         </main>
 

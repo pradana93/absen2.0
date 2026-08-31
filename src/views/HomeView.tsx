@@ -272,7 +272,8 @@ function WeekStrip() {
 }
 
 export default function HomeView({ nav }: { nav: NavFn }) {
-  const { session, logs, leaves, employees, fence, geo, company, shifts } = useApp();
+  const { session, logs, leaves, employees, fence, geo, company, shifts, board, ackBoard, activeSite } = useApp();
+  const toast = useToast();
   const me = session!;
   const today = todayKey();
   const myShift = shifts.find((s) => s.id === me.shiftId);
