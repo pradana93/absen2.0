@@ -11,9 +11,8 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { AttendanceLog } from "../lib/database";
-import { destination, GeoPoint, GeoReading, haversineMeters } from "../lib/geoUtils";
-import { formatMeters, formatCoord } from "../lib/geoUtils";
-import { wibTime, wibShortDate } from "../lib/format";
+import { destination, formatCoord, formatMeters, GeoPoint, GeoReading, haversineMeters } from "../lib/geoUtils";
+import { wibShortDate, wibTime } from "../lib/format";
 import { Chip } from "./bits";
 
 export interface GeoDraft { lat: number; lon: number; radiusM: number; }
@@ -50,7 +49,6 @@ export default function GeofenceMap({
   const layersRef = useRef<L.LayerGroup | null>(null);
   const hqRef = useRef<L.Marker | null>(null);
   const handleRef = useRef<L.Marker | null>(null);
-  const circleRef = useRef<L.Circle | null>(null);
   const fitRef = useRef(true);
   const hqLatest = useRef(hq);
   const radiusLatest = useRef(radiusM);
@@ -78,7 +76,6 @@ export default function GeofenceMap({
       layersRef.current = null;
       hqRef.current = null;
       handleRef.current = null;
-      circleRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -86,8 +83,7 @@ export default function GeofenceMap({
   /* ------------------------- editable pin + handle ----------------------- */
   useEffect(() => {
     const map = mapRef.current;
-    const layers = layersRef.current;
-    if (!map || !layers) return;
+    if (!map) return;
     if (hqRef.current) { hqRef.current.remove(); hqRef.current = null; }
     if (handleRef.current) { handleRef.current.remove(); handleRef.current = null; }
 
@@ -138,12 +134,11 @@ export default function GeofenceMap({
     if (!map || !layers) return;
     layers.clearLayers();
 
-    const circle = L.circle([hq.lat, hq.lon], {
+    L.circle([hq.lat, hq.lon], {
       radius: radiusM,
       color: "#159a6d", weight: 2, dashArray: "7 5",
       fillColor: "#159a6d", fillOpacity: 0.1,
     }).addTo(layers);
-    circleRef.current = circle;
 
     for (const p of points) {
       const inside = p.distanceM <= radiusM;
@@ -160,7 +155,6 @@ export default function GeofenceMap({
       L.marker([live.lat, live.lon], { icon: LIVE_ICON, zIndexOffset: 400 }).addTo(layers);
     }
 
-    /* fit once (and when the dataset meaningfully changes) */
     if (fitRef.current) {
       fitRef.current = false;
       const pts: L.LatLngExpression[] = [[hq.lat, hq.lon]];

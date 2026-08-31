@@ -1,132 +1,139 @@
 /**
- * Profil — identity card, full self-service edit, signature photo
- * enrollment, password change, device binding card, JWT session card,
- * tour re-open, logout.
+ * Profil — identity card, self-enrollment of the signature photo,
+ * password change, device binding status, and sign-out.
  */
 import { useState } from "react";
 import { useApp } from "../lib/store";
-import { fmtExpLeft } from "../lib/jwt";
-import { shortDevice } from "../lib/device";
+import { ROLE_LABEL } from "../lib/database";
 import { extractSignature } from "../lib/faceEngine";
-import { idr, relTime } from "../lib/format";
+import { idr, relTime, wibShortDate } from "../lib/format";
+import { shortDevice } from "../lib/device";
 import CameraCapture from "../components/CameraCapture";
 import { useToast } from "../components/Toast";
 import { Banner, Chip, InitialsAvatar, Modal, SectionLabel } from "../components/bits";
 import {
-  IconCamera, IconCheck, IconCpu, IconEdit, IconFace, IconLock, IconLogoutIn, IconShield, IconSmartphone, IconStar,
+  IconCamera, IconCheck, IconCpu, IconEdit, IconFace, IconLock, IconLogoutIn, IconShield, IconSmartphone, IconStar, IconX,
 } from "../components/icons";
 
 export default function ProfileView() {
-  const { session, updateEmployee, logout, audit, tokenExp, engine } = useApp();
+  const { session, company, engine, updateEmployee, logout, audit } = useApp();
   const toast = useToast();
   const me = session!;
 
-  /* edit form */
   const [editOpen, setEditOpen] = useState(false);
-  const [form, setForm] = useState({
-    name: me.name, phone: me.phone, address: me.address,
-    emergencyName: me.emergencyName, emergencyPhone: me.emergencyPhone,
-  });
-  const [editErr, setEditErr] = useState("");
+  const [fName, setFName] = useState(me.name);
+  const [fPhone, setFPhone] = useState(me.phone);
+  const [fAddress, setFAddress] = useState(me.address);
+  const [fEmergName, setFEmergName] = useState(me.emergencyName);
+  const [fEmergPhone, setFEmergPhone] = useState(me.emergencyPhone);
 
-  /* photo enrollment */
   const [photoOpen, setPhotoOpen] = useState(false);
-  const [encoding, setEncoding] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  /* password */
   const [pwOpen, setPwOpen] = useState(false);
-  const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
+  const [pwOld, setPwOld] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
   const [pwErr, setPwErr] = useState("");
 
   const saveProfile = () => {
-    if (form.name.trim().length < 3) return setEditErr("Nama minimal 3 karakter.");
-    updateEmployee(me.staffId, { ...form, name: form.name.trim() });
-    audit("PROFILE_UPDATE", me.staffId, "Profil diperbarui mandiri");
-    toast.push("ok", "Profil disimpan", "Perubahan langsung berlaku.");
+    if (fName.trim().length < 3) return toast.push("warn", "Nama terlalu pendek");
+    updateEmployee(me.staffId, {
+      name: fName.trim(), phone: fPhone, address: fAddress,
+      emergencyName: fEmergName, emergencyPhone: fEmergPhone,
+    });
+    audit("PROFILE_UPDATE", me.staffId, "Profil diperbarui sendiri");
+    toast.push("ok", "Profil disimpan");
     setEditOpen(false);
-    setEditErr("");
   };
 
   const onPhoto = async (canvas: HTMLCanvasElement, dataUrl: string) => {
-    setEncoding(true);
+    setSaving(true);
     const sig = await extractSignature(canvas);
-    updateEmployee(me.staffId, { photo: dataUrl, descriptor: sig.descriptor, hash: sig.hash });
+    updateEmployee(me.staffId, {
+      photo: dataUrl,
+      descriptor: sig.descriptor ?? me.descriptor,
+      hash: sig.hash ?? me.hash,
+    });
     audit("FACE_ENROLL", me.staffId, sig.descriptor ? "Baseline 128-D diperbarui" : "Baseline dHash diperbarui");
-    toast.push("ok", "Foto tanda tangan tersimpan", sig.descriptor ? "Encoding 128-D siap untuk absensi." : "Mode lite aktif untuk profil ini.");
-    setEncoding(false);
+    toast.push("ok", "Foto tanda tangan tersimpan", sig.descriptor ? "Encoding 128-D aktif untuk absensi." : "Mode lite aktif.");
+    setSaving(false);
     setPhotoOpen(false);
   };
 
-  const changePw = () => {
-    if (pw.current !== me.password) return setPwErr("Kata sandi saat ini salah.");
-    if (pw.next.length < 6) return setPwErr("Kata sandi baru minimal 6 karakter.");
-    if (pw.next !== pw.confirm) return setPwErr("Konfirmasi kata sandi tidak cocok.");
-    updateEmployee(me.staffId, { password: pw.next });
-    audit("PASSWORD_CHANGE", me.staffId, "Kata sandi diubah mandiri");
-    toast.push("ok", "Kata sandi diganti", "Gunakan kata sandi baru saat login berikutnya.");
-    setPwOpen(false);
-    setPw({ current: "", next: "", confirm: "" });
-    setPwErr("");
+  const savePw = () => {
+    if (pwOld !== me.password) return setPwErr("Kata sandi lama salah.");
+    if (pwNew.length < 6) return setPwErr("Kata sandi baru minimal 6 karakter.");
+    if (pwNew !== pwConfirm) return setPwErr("Konfirmasi kata sandi tidak sama.");
+    updateEmployee(me.staffId, { password: pwNew });
+    audit("PASSWORD_CHANGE", me.staffId, "Kata sandi diganti sendiri");
+    toast.push("ok", "Kata sandi diganti");
+    setPwOpen(false); setPwOld(""); setPwNew(""); setPwConfirm(""); setPwErr("");
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 pb-2">
       {/* identity card */}
-      <section className="card overflow-hidden">
-        <div className="grad-morning relative px-5 pb-12 pt-5 text-white">
-          <div className="pointer-events-none absolute -top-10 -right-10 h-40 w-40 rounded-full bg-white/15 blur-2xl" />
-          <p className="text-[11px] font-extrabold tracking-[0.16em] text-white/70 uppercase">Kartu Karyawan</p>
-          <p className="mt-0.5 font-mono text-[12px] font-bold text-white/80">{companyName(me)}</p>
-        </div>
-        <div className="-mt-8 flex items-end gap-3.5 px-5">
-          <div className="relative">
-            <InitialsAvatar name={me.name} photo={me.photo} seedKey={me.staffId} size="h-20 w-20 text-[26px] rounded-[22px]" />
-            <span className={`absolute -right-1 -bottom-1 grid h-6 w-6 place-items-center rounded-full border-2 border-white ${me.descriptor ? "bg-ok-500" : me.hash ? "bg-warn-500" : "bg-ink-300"}`}>
-              <IconFace size={12} className="text-white" />
-            </span>
-          </div>
-          <div className="min-w-0 flex-1 pb-1">
-            <h1 className="truncate font-display text-[22px] leading-tight font-extrabold text-ink-900">{me.name}</h1>
-            <p className="text-[12px] font-bold text-ink-400">{me.position} · {me.department}</p>
+      <section className="card relative overflow-hidden p-5">
+        <div className="pointer-events-none absolute -top-14 -right-14 h-44 w-44 rounded-full bg-sun-100 blur-2xl" />
+        <div className="relative flex items-center gap-4">
+          <InitialsAvatar name={me.name} photo={me.photo} seedKey={me.staffId} size="h-20 w-20 text-[26px]" rounded="rounded-3xl" />
+          <div className="min-w-0 flex-1">
+            <p className="flex flex-wrap items-center gap-1.5 font-display text-[20px] leading-tight font-extrabold text-ink-900">
+              <span className="truncate">{me.name}</span>
+              <Chip tone={me.role === "superadmin" ? "grape" : me.role === "companyadmin" ? "sun" : me.role === "manager" ? "sky" : "ink"} className="!px-1.5 !py-0.5 !text-[9px]">
+                {ROLE_LABEL[me.role].toUpperCase()}
+              </Chip>
+            </p>
+            <p className="font-mono text-[11.5px] font-semibold text-ink-400">{me.staffId} · NIK {me.nik}</p>
+            <p className="text-[11.5px] font-semibold text-ink-400">{me.position} · {me.department}</p>
+            <p className="truncate font-mono text-[10.5px] font-semibold text-ink-300">{me.email}</p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 px-5 py-4">
-          {[
-            ["Staff ID", me.staffId],
-            ["NIK", me.nik],
-            ["Email", me.email],
-            ["Telepon", me.phone],
-            ["Shift", me.shiftId.replace("sh-", "").toUpperCase()],
-            ["Gaji pokok", idr(me.salary.basic)],
-          ].map(([k, v]) => (
-            <div key={k} className="min-w-0">
-              <p className="text-[9.5px] font-extrabold tracking-wide text-ink-400 uppercase">{k}</p>
-              <p className="truncate font-mono text-[12.5px] font-bold text-ink-800">{v}</p>
-            </div>
-          ))}
+        <div className="relative mt-4 grid grid-cols-3 gap-2">
+          <div className="rounded-xl bg-ink-50 px-3 py-2 text-center">
+            <p className="font-display text-[14px] font-extrabold text-ink-900">{me.phone.split(" ").pop()}</p>
+            <p className="text-[8.5px] font-extrabold tracking-wide text-ink-400 uppercase">Telepon</p>
+          </div>
+          <div className="rounded-xl bg-ink-50 px-3 py-2 text-center">
+            <p className="font-display text-[14px] font-extrabold text-ink-900">{wibShortDate(new Date(me.createdAt))}</p>
+            <p className="text-[8.5px] font-extrabold tracking-wide text-ink-400 uppercase">Bergabung</p>
+          </div>
+          <div className="rounded-xl bg-ink-50 px-3 py-2 text-center">
+            <p className="font-display text-[14px] font-extrabold text-ink-900">{idr(me.salary.basic).replace("Rp", "").trim()}</p>
+            <p className="text-[8.5px] font-extrabold tracking-wide text-ink-400 uppercase">Pokok</p>
+          </div>
         </div>
-        <div className="flex gap-2 border-t border-ink-100 px-5 py-3.5">
-          <button className="btn-ghost flex-1 !py-2.5 !text-[13px]" onClick={() => { setForm({ name: me.name, phone: me.phone, address: me.address, emergencyName: me.emergencyName, emergencyPhone: me.emergencyPhone }); setEditOpen(true); }}>
-            <IconEdit size={15} /> Edit Profil
-          </button>
-          <button className="btn-sun flex-1 !py-2.5 !text-[13px]" onClick={() => setPhotoOpen(true)}>
-            <IconCamera size={15} /> Foto Tanda Tangan
-          </button>
-        </div>
+        <button className="btn-soft relative mt-3 w-full !py-2.5 !text-[13px]" onClick={() => { setFName(me.name); setFPhone(me.phone); setFAddress(me.address); setFEmergName(me.emergencyName); setFEmergPhone(me.emergencyPhone); setEditOpen(true); }}>
+          <IconEdit size={14} /> Edit Profil
+        </button>
       </section>
 
-      {/* face status */}
-      <section className="card flex items-center gap-3.5 p-4">
-        <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${me.descriptor ? "bg-teal-100 text-teal-600" : "bg-warn-100 text-warn-600"}`}>
-          <IconCpu size={20} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[13.5px] font-extrabold text-ink-900">Baseline Wajah</p>
-          <p className="text-[11.5px] font-semibold text-ink-400">
-            {me.descriptor ? `Encoding 128-D tersimpan · mesin ${engine === "ai" ? "AI aktif" : "lite"}` : me.hash ? "Tanda tangan dHash (mode lite)" : "Belum ada — absensi wajah belum aktif"}
-          </p>
+      {/* face baseline */}
+      <section className="card p-4">
+        <SectionLabel right={<Chip tone={engine === "ai" ? "teal" : "warn"}><IconCpu size={11} /> {engine === "ai" ? "AI 128-D" : "LITE"}</Chip>}>
+          Foto Tanda Tangan
+        </SectionLabel>
+        <div className="flex items-center gap-3.5">
+          {me.photo ? (
+            <img src={me.photo} alt={me.name} className="h-16 w-16 rounded-2xl object-cover ring-2 ring-sun-300" />
+          ) : (
+            <span className="grid h-16 w-16 place-items-center rounded-2xl bg-warn-100 text-warn-600"><IconFace size={26} /></span>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-extrabold text-ink-900">
+              {me.descriptor ? "Encoding 128-D tersimpan" : me.hash ? "Tanda tangan dHash tersimpan" : "Belum ada baseline"}
+            </p>
+            <p className="text-[11px] leading-snug font-semibold text-ink-400">
+              {me.descriptor || me.hash
+                ? "Absensi wajah aktif. Ambil ulang bila penampilan berubah signifikan."
+                : "Ambil foto agar absensi wajah bisa memverifikasi Anda."}
+            </p>
+          </div>
+          <button className="btn-sun !rounded-xl !px-3.5 !py-2.5 !text-[12.5px]" onClick={() => setPhotoOpen(true)}>
+            <IconCamera size={14} /> {me.photo ? "Perbarui" : "Ambil"}
+          </button>
         </div>
-        <Chip tone={me.descriptor ? "teal" : me.hash ? "warn" : "danger"}>{me.descriptor ? "128-D" : me.hash ? "dHash" : "KOSONG"}</Chip>
       </section>
 
       {/* device binding */}
@@ -137,22 +144,23 @@ export default function ProfileView() {
         <div className="min-w-0 flex-1">
           <p className="text-[13.5px] font-extrabold text-ink-900">Perangkat Terikat</p>
           <p className="truncate font-mono text-[11px] font-semibold text-ink-400">
-            {me.deviceId ? `${shortDevice(me.deviceId)} · diikat ${me.deviceBoundAt ? relTime(me.deviceBoundAt) : ""}` : "Belum terikat ke perangkat mana pun"}
+            {me.deviceId
+              ? `${shortDevice(me.deviceId)} · diikat ${me.deviceBoundAt ? relTime(me.deviceBoundAt) : ""}`
+              : "Belum terikat ke perangkat mana pun"}
           </p>
         </div>
         {me.deviceId ? <Chip tone="ok">AMAN</Chip> : <Chip tone="warn">LEMAH</Chip>}
       </section>
 
-      {/* session */}
-      <section className="card flex items-center gap-3.5 p-4">
-        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-grape-100 text-grape-600"><IconShield size={20} /></span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[13.5px] font-extrabold text-ink-900">Sesi JWT</p>
-          <p className="text-[11.5px] font-semibold text-ink-400">Access token berlaku {fmtExpLeft(tokenExp)} lagi</p>
-        </div>
-        <button className="btn-soft !rounded-xl !px-3 !py-2 !text-[12px]" onClick={() => setPwOpen(true)}>
-          <IconLock size={13} /> Ganti Sandi
+      {/* security */}
+      <section className="card p-4">
+        <SectionLabel right={<IconShield size={16} className="text-ink-300" />}>Keamanan</SectionLabel>
+        <button className="btn-ghost w-full !py-3 !text-[13px]" onClick={() => { setPwErr(""); setPwOpen(true); }}>
+          <IconLock size={15} /> Ganti Kata Sandi
         </button>
+        <p className="mt-2.5 text-[10.5px] leading-relaxed font-semibold text-ink-300">
+          Sesi JWT aktif 8 jam · perangkat diikat saat login pertama · {company.appName} v6.2
+        </p>
       </section>
 
       <button className="btn-soft w-full !py-3 text-sm" onClick={() => window.dispatchEvent(new Event("vittoria:tour"))}>
@@ -167,67 +175,62 @@ export default function ProfileView() {
       <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit Profil">
         <div className="space-y-3">
           <div>
-            <label className="label">Nama Lengkap</label>
-            <input className="input !py-2.5 text-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </div>
-          <div>
-            <label className="label">Telepon</label>
-            <input className="input !py-2.5 font-mono text-sm" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          </div>
-          <div>
-            <label className="label">Alamat</label>
-            <input className="input !py-2.5 text-sm" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+            <label className="label">Nama</label>
+            <input className="input !py-2.5 text-sm" value={fName} onChange={(e) => setFName(e.target.value)} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Kontak darurat</label>
-              <input className="input !py-2.5 text-sm" value={form.emergencyName} onChange={(e) => setForm({ ...form, emergencyName: e.target.value })} />
+              <label className="label">Telepon</label>
+              <input className="input !py-2.5 font-mono text-sm" value={fPhone} onChange={(e) => setFPhone(e.target.value)} />
             </div>
             <div>
               <label className="label">Telp. darurat</label>
-              <input className="input !py-2.5 font-mono text-sm" value={form.emergencyPhone} onChange={(e) => setForm({ ...form, emergencyPhone: e.target.value })} />
+              <input className="input !py-2.5 font-mono text-sm" value={fEmergPhone} onChange={(e) => setFEmergPhone(e.target.value)} />
             </div>
           </div>
-          {editErr && <Banner tone="warn">{editErr}</Banner>}
+          <div>
+            <label className="label">Alamat</label>
+            <input className="input !py-2.5 text-sm" value={fAddress} onChange={(e) => setFAddress(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Kontak darurat</label>
+            <input className="input !py-2.5 text-sm" value={fEmergName} onChange={(e) => setFEmergName(e.target.value)} />
+          </div>
           <button className="btn-sun w-full" onClick={saveProfile}><IconCheck size={16} /> Simpan</button>
         </div>
       </Modal>
 
       {/* photo modal */}
-      <Modal open={photoOpen} onClose={() => setPhotoOpen(false)} title="Foto Tanda Tangan" wide>
-        <div className="space-y-3">
-          <Banner tone="info" title="Baseline absensi wajah">
-            Foto ini menjadi pembanding saat kamu absen. Ambil dengan pencahayaan baik dan wajah menghadap kamera.
-          </Banner>
-          <CameraCapture onCapture={(c, d) => void onPhoto(c, d)} disabled={encoding} heightClass="h-56" captureLabel={encoding ? "Menyimpan…" : "Ambil & Simpan"} />
-        </div>
+      <Modal open={photoOpen} onClose={() => setPhotoOpen(false)} title="Foto Tanda Tangan">
+        {saving ? (
+          <Banner tone="info" title="Menyimpan encoding…">Menghitung vektor wajah dari foto.</Banner>
+        ) : (
+          <CameraCapture onCapture={(c, d) => void onPhoto(c, d)} heightClass="h-56" captureLabel="Simpan Foto" />
+        )}
       </Modal>
 
       {/* password modal */}
       <Modal open={pwOpen} onClose={() => setPwOpen(false)} title="Ganti Kata Sandi">
         <div className="space-y-3">
           <div>
-            <label className="label">Kata sandi saat ini</label>
-            <input type="password" className="input !py-2.5 text-sm" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
+            <label className="label">Kata sandi lama</label>
+            <input type="password" className="input !py-2.5 text-sm" value={pwOld} onChange={(e) => setPwOld(e.target.value)} />
           </div>
           <div>
             <label className="label">Kata sandi baru (min. 6)</label>
-            <input type="password" className="input !py-2.5 text-sm" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} />
+            <input type="password" className="input !py-2.5 text-sm" value={pwNew} onChange={(e) => setPwNew(e.target.value)} />
           </div>
           <div>
             <label className="label">Ulangi kata sandi baru</label>
-            <input type="password" className="input !py-2.5 text-sm" value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} />
+            <input type="password" className="input !py-2.5 text-sm" value={pwConfirm} onChange={(e) => setPwConfirm(e.target.value)} />
           </div>
           {pwErr && <Banner tone="warn">{pwErr}</Banner>}
-          <button className="btn-sun w-full" onClick={changePw}><IconLock size={15} /> Ganti Kata Sandi</button>
+          <button className="btn-sun w-full" onClick={savePw} disabled={!pwOld || !pwNew || !pwConfirm}>
+            <IconLock size={15} /> Ganti Kata Sandi
+          </button>
         </div>
       </Modal>
-      <span className="hidden"><SectionLabel>{""}</SectionLabel></span>
+      <span className="hidden"><IconX size={1} /></span>
     </div>
   );
-}
-
-function companyName(me: { department: string }): string {
-  void me;
-  return "PT Vittoria Logistik Indonesia";
 }

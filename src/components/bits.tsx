@@ -46,7 +46,13 @@ export function SectionLabel({ children, right }: { children: ReactNode; right?:
 
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: string }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className="flex cursor-pointer items-center gap-2.5">
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="flex cursor-pointer items-center gap-2.5"
+    >
       <span className={`relative h-7 w-12 rounded-full transition-colors duration-200 ${checked ? "bg-sun-500" : "bg-ink-200"}`}>
         <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all duration-200 ${checked ? "left-6" : "left-1"}`} />
       </span>
@@ -55,6 +61,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
   );
 }
 
+/** Two-tap confirm to avoid accidental destructive actions. */
 export function ConfirmButton({
   label, icon, onConfirm, className = "btn-danger", confirmLabel = "Yakin? Ketuk lagi",
 }: {
@@ -65,10 +72,13 @@ export function ConfirmButton({
   useEffect(() => () => { if (t.current) window.clearTimeout(t.current); }, []);
   return (
     <button
-      className={`${armed ? "btn-danger !bg-danger-500 !text-white" : className}`}
+      className={`${armed ? "btn-danger bg-danger-500 !text-white" : className}`}
       onClick={() => {
         if (armed) { setArmed(false); onConfirm(); }
-        else { setArmed(true); t.current = window.setTimeout(() => setArmed(false), 2600); }
+        else {
+          setArmed(true);
+          t.current = window.setTimeout(() => setArmed(false), 2600);
+        }
       }}
     >
       {icon} {armed ? confirmLabel : label}
@@ -83,7 +93,9 @@ export function InitialsAvatar({
 }: {
   name: string; photo?: string | null; seedKey: string; size?: string; rounded?: string;
 }) {
-  if (photo) return <img src={photo} alt={name} className={`${size} ${rounded} shrink-0 object-cover shadow-sm`} />;
+  if (photo) {
+    return <img src={photo} alt={name} className={`${size} ${rounded} shrink-0 object-cover shadow-sm`} />;
+  }
   const idx = Math.abs([...seedKey].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_TONES.length;
   const initials = name.split(" ").slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("");
   return (
@@ -104,6 +116,51 @@ export function EmptyState({ icon, title, desc, action }: { icon: ReactNode; tit
   );
 }
 
+export function Modal({
+  open, onClose, title, children, wide = false,
+}: {
+  open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center">
+      <div className="anim-fade-in absolute inset-0 bg-ink-950/55 backdrop-blur-[2px]" onClick={onClose} />
+      <div className={`sheet-up relative max-h-[88dvh] w-full overflow-y-auto rounded-t-[26px] bg-white p-5 shadow-[0_-20px_60px_rgba(23,42,89,0.3)] sm:rounded-[26px] ${wide ? "sm:max-w-lg" : "sm:max-w-md"}`}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-display text-[19px] font-extrabold text-ink-900">{title}</h3>
+          <button onClick={onClose} className="cursor-pointer rounded-xl bg-ink-50 p-2 text-ink-400 transition hover:bg-ink-100 hover:text-ink-700 active:scale-90" aria-label="Tutup">
+            <IconX size={15} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Animated number — eases toward `n` whenever it changes. */
+export function CountUp({ n, suffix = "" }: { n: number; suffix?: string }) {
+  const [v, setV] = useState(n);
+  const prevRef = useRef<number | null>(null);
+  useEffect(() => {
+    const from = prevRef.current ?? 0;
+    prevRef.current = n;
+    if (from === n) { setV(n); return; }
+    const t0 = performance.now();
+    const dur = 720;
+    let raf = 0;
+    const step = (t: number) => {
+      const p = Math.min(1, (t - t0) / dur);
+      const e = 1 - Math.pow(1 - p, 3);
+      setV(Math.round(from + (n - from) * e));
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [n]);
+  return <span className="tabular-nums">{v.toLocaleString("id-ID")}{suffix}</span>;
+}
+
 export function StatTile({ label, value, tone = "sun", sub }: { label: string; value: ReactNode; tone?: Tone; sub?: string }) {
   const tint: Record<Tone, string> = {
     sun: "bg-sun-100 text-sun-700", sky: "bg-sky-100 text-sky-600", teal: "bg-teal-100 text-teal-600",
@@ -111,47 +168,12 @@ export function StatTile({ label, value, tone = "sun", sub }: { label: string; v
     warn: "bg-warn-100 text-warn-600", danger: "bg-danger-100 text-danger-600", ink: "bg-ink-100 text-ink-600",
   };
   return (
-    <div className="card card-press flex-1 px-3 py-2.5">
+    <div className="card card-press flex-1 px-3 py-2.5 transition-shadow hover:shadow-[0_14px_34px_rgba(23,42,89,0.12)]">
       <p className="text-[9.5px] font-extrabold tracking-[0.1em] text-ink-400 uppercase">{label}</p>
-      <p className={`mt-1 inline-block rounded-xl px-2 py-0.5 font-display text-[20px] leading-tight font-bold ${tint[tone]}`}>{value}</p>
+      <p className={`mt-1 inline-block rounded-xl px-2 py-0.5 font-display text-[20px] leading-tight font-bold ${tint[tone]}`}>
+        {typeof value === "number" ? <CountUp n={value} /> : value}
+      </p>
       {sub && <p className="mt-0.5 text-[10px] font-semibold text-ink-400">{sub}</p>}
-    </div>
-  );
-}
-
-/** Small friendly page header used by secondary tabs. */
-export function PageHeader({ title, sub, right }: { title: string; sub?: string; right?: ReactNode }) {
-  return (
-    <div className="mb-4 flex items-start justify-between gap-3">
-      <div>
-        <h1 className="font-display text-[26px] leading-tight font-extrabold text-ink-900">{title}</h1>
-        {sub && <p className="mt-0.5 text-[13px] font-semibold text-ink-400">{sub}</p>}
-      </div>
-      {right}
-    </div>
-  );
-}
-
-export function Modal({
-  open, onClose, title, children, wide,
-}: {
-  open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean;
-}) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-[70] grid place-items-center bg-ink-950/55 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div
-        className={`anim-pop max-h-[86dvh] w-full ${wide ? "max-w-lg" : "max-w-sm"} overflow-y-auto rounded-[24px] bg-white p-5 shadow-[0_40px_100px_rgba(0,0,0,0.4)]`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-display text-[19px] font-extrabold text-ink-900">{title}</h3>
-          <button onClick={onClose} className="cursor-pointer rounded-xl p-2 text-ink-400 transition hover:bg-ink-50" aria-label="Tutup">
-            <IconX size={17} />
-          </button>
-        </div>
-        {children}
-      </div>
     </div>
   );
 }
@@ -188,6 +210,19 @@ export function SuccessBurst() {
           <path d="m5 12.5 4.5 4.5L19 7.5" />
         </svg>
       </span>
+    </div>
+  );
+}
+
+/** Small friendly page header used by secondary tabs. */
+export function PageHeader({ title, sub, right }: { title: string; sub?: string; right?: ReactNode }) {
+  return (
+    <div className="mb-4 flex items-start justify-between gap-3">
+      <div>
+        <h1 className="font-display text-[26px] leading-tight font-extrabold text-ink-900">{title}</h1>
+        {sub && <p className="mt-0.5 text-[13px] font-semibold text-ink-400">{sub}</p>}
+      </div>
+      {right}
     </div>
   );
 }

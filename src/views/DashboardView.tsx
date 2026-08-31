@@ -1,8 +1,7 @@
 /**
  * Dashboard (Admin HR / Super Admin) — KPIs with shift-aware lateness,
  * live ops ticker, anomaly detection, department chart, 7-day trend,
- * geofence map (true map, default) / radar toggle, leave queue, activity
- * feed and report presets.
+ * geofence map/radar, leave queue, activity feed and report presets.
  */
 import { useEffect, useMemo, useState } from "react";
 import { NavFn } from "../App";
@@ -32,10 +31,9 @@ function OpsTicker() {
   }, []);
   const today = todayKey();
   const now = new Date();
-  const h = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", hour12: false }).format(now)) % 24;
-  const m = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", minute: "2-digit" }).format(now));
-  const wibMin = h * 60 + m;
-  const isHoliday = company.holidays?.some((x) => x.date === today) ?? false;
+  const wibMin = (Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", hour12: false }).format(now)) % 24) * 60 +
+    Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", minute: "2-digit" }).format(now));
+  const isHoliday = company.holidays?.some((h) => h.date === today) ?? false;
 
   let onShift = 0, onBreak = 0, notIn = 0;
   for (const e of employees) {
@@ -84,7 +82,6 @@ function AnomalyWidget() {
       counts.set(l.staffId, c);
     }
     return [...counts.entries()]
-      .filter(([, c]) => c.n >= 1)
       .map(([id, c]) => ({ e: employees.find((x) => x.staffId === id), n: c.n, why: [...c.reasons].slice(0, 2).join(" · ") }))
       .filter((x) => !!x.e);
   }, [logs, employees]);
@@ -130,9 +127,10 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
         if (wibMinutes(log.ts) > start + sh.graceMin) late++;
       }
     }
-    const onLeaveToday = leaves.filter((lv) => lv.status === "approved" && lv.date <= today && today <= lv.date).length;
+    const onLeaveToday = leaves.filter((lv) => lv.status === "approved" && lv.date <= today).length;
     return {
-      hadir: verifiedIn.size, late, cuti: onLeaveToday,
+      hadir: verifiedIn.size, late,
+      cuti: onLeaveToday,
       belum: Math.max(0, activeStaff.length - verifiedIn.size),
       rejected: todayLogs.filter((l) => l.status === "REJECTED").length,
     };
@@ -165,6 +163,7 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
 
   const hrQueue = useMemo(() => leaves.filter((l) => l.status === "pending_hr").sort((a, b) => b.createdAt - a.createdAt), [leaves]);
   const feed = todayLogs.slice(0, 8);
+  const radarPoints = todayLogs;
 
   const exportRange = (days: number, label: string) => {
     const from = Date.now() - days * 86400_000;
@@ -205,41 +204,6 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
 
       <AnomalyWidget />
 
-      {/* geofence — true map by default */}
-      <section>
-        <SectionLabel
-          right={
-            <div className="flex rounded-full border border-ink-100 bg-white p-0.5">
-              {(["map", "radar"] as const).map((mo) => (
-                <button
-                  key={mo}
-                  onClick={() => setGeoMode(mo)}
-                  className={`cursor-pointer rounded-full px-2.5 py-1 text-[10px] font-extrabold tracking-wide uppercase transition ${
-                    geoMode === mo ? "bg-ink-900 text-white shadow" : "text-ink-400 hover:text-ink-600"
-                  }`}
-                >
-                  {mo === "map" ? "Peta" : "Radar"}
-                </button>
-              ))}
-            </div>
-          }
-        >
-          <span className="inline-flex items-center gap-1.5"><IconPin size={16} /> Peta Geofence</span>
-        </SectionLabel>
-        {geoMode === "map" ? (
-          <GeofenceMap
-            hq={{ lat: company.hqLat, lon: company.hqLon }}
-            radiusM={company.radiusM}
-            points={todayLogs}
-            live={geo}
-            heightClass="h-[320px]"
-          />
-        ) : (
-          <Radar hq={{ lat: company.hqLat, lon: company.hqLon }} radiusM={company.radiusM} points={todayLogs} live={geo} />
-        )}
-      </section>
-
-      {/* department chart */}
       <section className="card p-4">
         <SectionLabel right={<Chip tone="ink">Check-IN / departemen</Chip>}>Kehadiran Departemen</SectionLabel>
         <div className="space-y-2.5">
@@ -250,14 +214,16 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
                 <span className="font-mono text-ink-400">{s.hadir}/{s.total}</span>
               </div>
               <div className="h-2.5 overflow-hidden rounded-full bg-ink-50">
-                <div className="bar-grow-x h-full rounded-full bg-gradient-to-r from-sun-400 to-sun-600" style={{ width: `${s.total ? (s.hadir / s.total) * 100 : 0}%` }} />
+                <div
+                  className="bar-grow-x h-full rounded-full bg-gradient-to-r from-sun-400 to-sun-600"
+                  style={{ width: `${s.total ? (s.hadir / s.total) * 100 : 0}%` }}
+                />
               </div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* weekly trend */}
       <section className="card p-4">
         <SectionLabel right={<Chip tone="ink">7 hari</Chip>}>Tren Check-In</SectionLabel>
         <div className="flex h-28 items-end gap-2">
@@ -276,7 +242,6 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
         </div>
       </section>
 
-      {/* HR leave queue */}
       <section>
         <SectionLabel right={<Chip tone={hrQueue.length ? "warn" : "ok"}>{hrQueue.length} menunggu</Chip>}>Persetujuan HR</SectionLabel>
         {hrQueue.length === 0 ? (
@@ -298,7 +263,33 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
         )}
       </section>
 
-      {/* report presets */}
+      <section>
+        <SectionLabel
+          right={
+            <div className="flex rounded-full border border-ink-100 bg-white p-0.5">
+              {(["map", "radar"] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setGeoMode(m)}
+                  className={`cursor-pointer rounded-full px-2.5 py-1 text-[10px] font-extrabold tracking-wide uppercase transition ${
+                    geoMode === m ? "bg-ink-900 text-white shadow" : "text-ink-400 hover:text-ink-600"
+                  }`}
+                >
+                  {m === "map" ? "Peta" : "Radar"}
+                </button>
+              ))}
+            </div>
+          }
+        >
+          Peta Geofence
+        </SectionLabel>
+        {geoMode === "map" ? (
+          <GeofenceMap hq={{ lat: company.hqLat, lon: company.hqLon }} radiusM={company.radiusM} points={radarPoints} live={geo} heightClass="h-[300px]" />
+        ) : (
+          <Radar hq={{ lat: company.hqLat, lon: company.hqLon }} radiusM={company.radiusM} points={radarPoints} live={geo} />
+        )}
+      </section>
+
       <section className="card p-4">
         <SectionLabel right={<IconFile size={16} className="text-ink-300" />}>Laporan</SectionLabel>
         <div className="grid grid-cols-3 gap-2">
@@ -309,7 +300,6 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
         <p className="mt-2 text-[10.5px] font-bold text-ink-300">CSV lengkap semua kolom — siap diolah di spreadsheet.</p>
       </section>
 
-      {/* activity feed */}
       <section>
         <SectionLabel
           right={
@@ -324,8 +314,8 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
           <p className="card px-4 py-5 text-center text-[13px] font-semibold text-ink-400">Belum ada aktivitas hari ini.</p>
         ) : (
           <div className="card divide-y divide-ink-100/80">
-            {feed.map((l) => (
-              <div key={l.id} className="flex items-center gap-3 px-3.5 py-2.5">
+            {feed.map((l, i) => (
+              <div key={l.id} className="tile-pop flex items-center gap-3 px-3.5 py-2.5" style={{ animationDelay: `${i * 45}ms` }}>
                 <InitialsAvatar name={l.name} seedKey={l.staffId} size="h-9 w-9 text-[12px]" rounded="rounded-xl" />
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 text-[13px] font-extrabold text-ink-900">
@@ -355,6 +345,7 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
           <span className="text-[13px] font-extrabold text-ink-800">Jejak Audit</span>
         </button>
       </div>
+      <span className="hidden"><IconPin size={1} /></span>
     </div>
   );
 }

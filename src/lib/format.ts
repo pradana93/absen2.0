@@ -58,7 +58,7 @@ export function idr(n: number): string {
   }).format(n);
 }
 
-/** 485 → "8j 05m" ; 95 → "1j 35m" */
+/** 485 → "8j 05m" */
 export function fmtDuration(min: number): string {
   const h = Math.floor(min / 60);
   const m = Math.round(min % 60);

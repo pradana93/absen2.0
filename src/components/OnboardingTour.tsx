@@ -71,6 +71,11 @@ const ADMIN_STEPS: Step[] = [
     body: "Geser pin oranye untuk memilih area gudang dan seret pegangan putih untuk mengatur radius — semua dari menu Aturan.",
   },
   {
+    icon: <IconUsers size={22} />,
+    title: "Struktur Organisasi",
+    body: "Susun hierarki perusahaan di tab Struktur — tautkan posisi ke karyawan, dan seluruh tim melihatnya secara read-only.",
+  },
+  {
     icon: <IconShield size={22} />,
     title: "Jejak Audit Lengkap",
     body: "Setiap login, absensi, perubahan aturan, dan penerbitan slip tercatat di audit — transparan dan bisa diekspor.",

@@ -1,7 +1,7 @@
 /**
  * Live camera (getUserMedia) with capture-to-canvas.
- * Mirrored selfie preview, corner-bracket reticle, scanline, front/back flip,
- * and an optional 2-frame liveness capture (frame1 passed as 3rd arg).
+ * Mirrored selfie preview, corner-bracket reticle, animated scanline,
+ * front/back flip, and optional 2-frame liveness capture.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconCamera, IconRefresh, IconScan } from "./icons";
@@ -53,14 +53,14 @@ export default function CameraCapture({
       setStatus("live");
     } catch (e) {
       const name = (e as DOMException)?.name;
-      if (name === "NotAllowedError" || name === "SecurityError") setStatus("denied");
-      else {
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        setStatus("denied");
+      } else {
         setStatus("error");
         setErrMsg(name === "NotFoundError" ? "Kamera tidak ditemukan di perangkat ini." : "Gagal membuka kamera. Coba lagi.");
       }
     }
   }, [stop]);
-
   useEffect(() => () => stop(), [stop]);
 
   const flip = () => {
@@ -69,6 +69,7 @@ export default function CameraCapture({
     void start(next);
   };
 
+  /** Grab one mirrored frame from the live stream. */
   const snap = (): HTMLCanvasElement | null => {
     const v = videoRef.current;
     if (!v || v.videoWidth === 0) return null;
@@ -98,7 +99,10 @@ export default function CameraCapture({
     window.setTimeout(() => {
       const c2 = snap();
       setScanning(false);
-      if (!c2) { onCapture(c1, c1.toDataURL("image/jpeg", 0.72)); return; }
+      if (!c2) {
+        onCapture(c1, c1.toDataURL("image/jpeg", 0.72));
+        return;
+      }
       onCapture(c2, c2.toDataURL("image/jpeg", 0.72), c1);
     }, 650);
   };
@@ -107,7 +111,10 @@ export default function CameraCapture({
     <div className="space-y-3">
       <div className={`relative overflow-hidden rounded-[22px] border border-ink-100 bg-ink-900 shadow-[inset_0_0_40px_rgba(0,0,0,0.4)] ${heightClass}`}>
         <video
-          ref={videoRef} playsInline muted autoPlay
+          ref={videoRef}
+          playsInline
+          muted
+          autoPlay
           className={`h-full w-full object-cover transition-opacity duration-300 ${status === "live" ? "opacity-100" : "opacity-0"} ${facing === "user" ? "-scale-x-100" : ""}`}
         />
 
@@ -125,13 +132,13 @@ export default function CameraCapture({
               </div>
             </div>
             <span className="absolute top-2.5 left-2.5 inline-flex items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-1 text-[10px] font-extrabold tracking-wider text-white backdrop-blur">
-              <span className={`h-1.5 w-1.5 rounded-full ${scanning ? "anim-blink bg-sun-400" : "anim-blink bg-ok-500"}`} />
-              {scanning ? "LIVENESS 2/2" : "LIVE"}
+              <span className="anim-blink h-1.5 w-1.5 rounded-full bg-ok-500" /> LIVE
             </span>
             <button
               onClick={flip}
               className="absolute top-2 right-2 cursor-pointer rounded-xl bg-black/45 p-2.5 text-white backdrop-blur transition hover:bg-black/60 active:scale-95"
-              title="Putar kamera" aria-label="Putar kamera"
+              title="Putar kamera"
+              aria-label="Putar kamera"
             >
               <IconRefresh size={16} />
             </button>
@@ -166,8 +173,13 @@ export default function CameraCapture({
         {flash && <div className="anim-fade-in pointer-events-none absolute inset-0 bg-white/85" />}
       </div>
 
-      <button onClick={capture} disabled={disabled || status !== "live" || scanning} className="btn-sun w-full !py-4 text-base">
-        <IconCamera size={20} /> {scanning ? "Memindai liveness…" : captureLabel}
+      <button
+        onClick={capture}
+        disabled={disabled || status !== "live" || scanning}
+        className="btn-sun w-full !py-4 text-base"
+      >
+        {scanning ? "Memindai frame 2/2…" : ""}
+        {!scanning && <><IconCamera size={20} /> {captureLabel}</>}
       </button>
     </div>
   );

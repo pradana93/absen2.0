@@ -1,18 +1,18 @@
 /**
  * Global app store — session (JWT), employees, logs, breaks, leaves,
- * payslips, shifts, company, settings, audit, notifications, live GPS,
+ * payslips, shifts, org, company, settings, audit, notifications, live GPS,
  * face-engine tier — plus cross-tab tenant sync and identity import.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  applyBrand, AttendanceLog, AuditLog, BreakRec, clearAll, Company, db, decodeIdentity, Employee,
-  ensureFreshVersion, KEY_COMPANY, LeaveRequest, Notif, Payslip, Role, seedAudit, seedCompany,
-  seedEmployees, seedLeaves, seedLogs, seedNotifs, seedShifts, Settings, Shift, TenantIdentity,
+  applyBrand, AttendanceLog, AuditLog, BreakRec, clearAll, Company, db, decodeIdentity, Employee, ensureFreshVersion,
+  KEY_COMPANY, LeaveRequest, Notif, OrgNode, Payslip, Role, seedAudit, seedCompany, seedEmployees,
+  seedLeaves, seedLogs, seedNotifs, seedOrgNodes, seedShifts, Settings, Shift, TenantIdentity,
 } from "./database";
 import { evaluateFence, FenceVerdict, GeoReading } from "./geoUtils";
 import { EngineStatus, initFaceEngine, onEngineStatus } from "./faceEngine";
 import { issueTokens, TokenPair } from "./jwt";
-import { uid } from "./format";
+import { uid, wibDayKey } from "./format";
 import { getDeviceId, shortDevice } from "./device";
 
 export interface LoginResult { ok: boolean; error?: string; }
@@ -25,6 +25,7 @@ interface AppState {
   leaves: LeaveRequest[];
   payslips: Payslip[];
   shifts: Shift[];
+  org: OrgNode[];
   audits: AuditLog[];
   notifs: Notif[];
   settings: Settings;
@@ -46,6 +47,9 @@ interface AppState {
   decideLeave: (id: string, approve: boolean, stage: "manager" | "hr") => void;
   issuePayslip: (slip: Payslip, byName: string) => void;
   withdrawPayslip: (id: string) => void;
+  addOrgNode: (n: OrgNode) => void;
+  updateOrgNode: (id: string, patch: Partial<OrgNode>) => void;
+  removeOrgNode: (id: string) => void;
   addShift: (s: Shift) => void;
   updateShift: (id: string, patch: Partial<Shift>) => void;
   removeShift: (id: string) => void;
@@ -79,6 +83,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       db.saveLeaves(seedLeaves());
       db.saveAudit(seedAudit());
       db.saveNotifs(seedNotifs());
+      db.saveOrg(seedOrgNodes());
       db.markSeeded();
       return c;
     }
@@ -89,6 +94,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [breaks, setBreaks] = useState<BreakRec[]>(() => db.loadBreaks());
   const [leaves, setLeaves] = useState<LeaveRequest[]>(() => db.loadLeaves());
   const [payslips, setPayslips] = useState<Payslip[]>(() => db.loadPayslips());
+  const [org, setOrg] = useState<OrgNode[]>(() => {
+    const o = db.loadOrg();
+    return o.length ? o : seedOrgNodes();
+  });
   const [shifts, setShifts] = useState<Shift[]>(() => {
     const s = db.loadShifts();
     return s.length ? s : seedShifts();
@@ -120,6 +129,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => db.saveBreaks(breaks), [breaks]);
   useEffect(() => db.saveLeaves(leaves), [leaves]);
   useEffect(() => db.savePayslips(payslips), [payslips]);
+  useEffect(() => db.saveOrg(org), [org]);
   useEffect(() => db.saveShifts(shifts), [shifts]);
   useEffect(() => db.saveAudit(audits), [audits]);
   useEffect(() => db.saveNotifs(notifs), [notifs]);
@@ -237,7 +247,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const t = window.setTimeout(logout, left);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.accessExp, logout]);
+  }, [session?.accessExp]);
 
   /* --------------------------- identity import ---------------------------- */
   const importIdentity = useCallback((identity: TenantIdentity, source: string): boolean => {
@@ -365,7 +375,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         : { ...l, status: "rejected" as const, hrDecision: decision };
     }));
 
-    const nextStatus = stage === "manager" ? (approve ? "pending_hr" : "rejected") : approve ? "approved" : "rejected";
     const verb = approve ? (stage === "manager" ? "disetujui Manajer → lanjut ke HR" : "disetujui HR (final)") : "ditolak";
     setNotifs((prev) => [{
       id: uid("ntf"), staffId: lv.staffId,
@@ -377,7 +386,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       id: uid("aud"), ts: Date.now(), actorId: actor?.staffId ?? "system", actorName: actor?.name ?? "Sistem",
       role: (actor?.role ?? "system") as AuditLog["role"],
       action: stage === "manager" ? (approve ? "LEAVE_APPROVE_MGR" : "LEAVE_REJECT_MGR") : approve ? "LEAVE_APPROVE_HR" : "LEAVE_REJECT_HR",
-      target: lv.staffId, detail: `${lv.type} ${lv.days} hari · ${lv.date} → ${nextStatus}`,
+      target: lv.staffId, detail: `${lv.type} ${lv.days} hari · ${lv.date}`,
     }, ...prev]);
   }, []);
 
@@ -410,6 +419,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, ...prev]);
   }, []);
 
+  /* ----------------------------- organization ----------------------------- */
+  const addOrgNode = useCallback((n: OrgNode) => setOrg((prev) => [...prev, n]), []);
+  const updateOrgNode = useCallback(
+    (id: string, patch: Partial<OrgNode>) => setOrg((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n))),
+    [],
+  );
+  const removeOrgNode = useCallback((id: string) => {
+    setOrg((prev) => {
+      const victim = prev.find((n) => n.id === id);
+      if (!victim) return prev;
+      return prev
+        .filter((n) => n.id !== id)
+        .map((n) => (n.parentId === id ? { ...n, parentId: victim.parentId } : n));
+    });
+  }, []);
+
   /* --------------------------------- shifts ------------------------------- */
   const addShift = useCallback((s: Shift) => setShifts((prev) => [...prev, s]), []);
   const updateShift = useCallback(
@@ -419,18 +444,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const removeShift = useCallback((id: string) => setShifts((prev) => prev.filter((s) => s.id !== id)), []);
 
   /* --------------------------------- breaks ------------------------------- */
+  const todayWib = () => wibDayKey(new Date());
+
   const activeBreak = useMemo(() => {
     const s = session;
     if (!s) return null;
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const today = todayWib();
     return breaks.find((b) => b.staffId === s.staffId && b.day === today && !b.end) ?? null;
   }, [breaks, session]);
 
   const startBreak = useCallback(() => {
     const s = sessionRef.current;
     if (!s) return;
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-    setBreaks((prev) => [...prev, { id: uid("brk"), staffId: s.staffId, day: today, start: Date.now(), end: null }]);
+    setBreaks((prev) => [...prev, { id: uid("brk"), staffId: s.staffId, day: todayWib(), start: Date.now(), end: null }]);
   }, []);
 
   const endBreak = useCallback(() => {
@@ -457,6 +483,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setLogs(seedLogs({ lat: c.hqLat, lon: c.hqLon }, c.radiusM));
     setLeaves(seedLeaves());
     setPayslips([]);
+    setOrg(seedOrgNodes());
     setBreaks([]);
     setAudits(seedAudit());
     setNotifs(seedNotifs());
@@ -466,7 +493,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value: AppState = {
-    company, employees, logs, breaks, leaves, payslips, shifts, audits, notifs, settings,
+    company, employees, logs, breaks, leaves, payslips, shifts, org, audits, notifs, settings,
     engine, geo, fence,
     session: sessionEmployee,
     tokenExp: session?.accessExp ?? 0,
@@ -475,6 +502,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addLog, clearLogs,
     addLeave, decideLeave,
     issuePayslip, withdrawPayslip,
+    addOrgNode, updateOrgNode, removeOrgNode,
     addShift, updateShift, removeShift,
     activeBreak, startBreak, endBreak,
     markNotifsRead,

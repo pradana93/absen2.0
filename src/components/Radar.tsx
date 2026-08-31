@@ -4,7 +4,7 @@
  */
 import { useMemo, useState } from "react";
 import { AttendanceLog } from "../lib/database";
-import { bearingDeg, GeoPoint, GeoReading, haversineMeters, formatMeters, formatCoord } from "../lib/geoUtils";
+import { bearingDeg, formatCoord, formatMeters, GeoPoint, GeoReading, haversineMeters } from "../lib/geoUtils";
 import { wibShortDate, wibTime } from "../lib/format";
 import { Chip, InitialsAvatar } from "./bits";
 import { IconPin } from "./icons";
@@ -71,7 +71,9 @@ export default function Radar({ hq, radiusM, points, live }: Props) {
           </defs>
 
           <circle cx={C} cy={C} r={Math.max(8, rPx)} fill="rgba(21,154,109,0.10)" stroke="var(--color-ok-500, #159a6d)" strokeWidth="2" strokeDasharray="7 5" />
-          <text x={C} y={C - Math.max(8, rPx) - 7} textAnchor="middle" fontSize="10.5" fontWeight="800" fill="#7fdcb0">{radiusM} m</text>
+          <text x={C} y={C - Math.max(8, rPx) - 7} textAnchor="middle" fontSize="10.5" fontWeight="800" fill="#7fdcb0">
+            {radiusM} m
+          </text>
 
           <circle cx={C} cy={C} r="9" fill="var(--color-sun-500, #f07300)" />
           <circle cx={C} cy={C} r="3.5" fill="#101826" />
@@ -103,7 +105,8 @@ export default function Radar({ hq, radiusM, points, live }: Props) {
             { l: "−", f: () => setZoom((z) => Math.max(0.5, z - 0.5)) },
           ].map((b) => (
             <button
-              key={b.l} onClick={b.f}
+              key={b.l}
+              onClick={b.f}
               className="grid h-9 w-9 cursor-pointer place-items-center rounded-xl bg-white/10 font-display text-lg font-bold text-white backdrop-blur transition hover:bg-white/20 active:scale-90"
               aria-label={b.l === "+" ? "Perbesar" : "Perkecil"}
             >

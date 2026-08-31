@@ -45,7 +45,7 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
               Reset Data Lokal
             </button>
           </div>
-          <p className="mt-4 text-[10.5px] font-bold tracking-wide text-ink-300">Vittoria HR · v6.1</p>
+          <p className="mt-4 text-[10.5px] font-bold tracking-wide text-ink-300">Vittoria HR · v6.2</p>
         </div>
       </div>
     );

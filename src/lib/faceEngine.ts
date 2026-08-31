@@ -69,7 +69,7 @@ export interface FaceSignature {
 
 export interface MatchResult {
   staffId: string;
-  distance: number; // euclidean for 128-D, normalized hamming for dHash
+  distance: number;
 }
 
 function hamming(a: string, b: string): number {
@@ -79,7 +79,6 @@ function hamming(a: string, b: string): number {
   return d / Math.max(1, n);
 }
 
-/** Downscale to a square canvas for hashing. */
 function downscale(canvas: HTMLCanvasElement, size: number): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = size; c.height = size;
@@ -167,7 +166,6 @@ export function identifyBest(
     if (best) return null; // face detected but nobody matched
   }
 
-  // lite / fallback path — normalized hamming, stricter threshold
   if (sig.hash) {
     const liteThreshold = Math.min(0.18, threshold * 0.36);
     for (const r of registry) {

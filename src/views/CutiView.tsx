@@ -214,16 +214,16 @@ export default function CutiView() {
       )}
 
       {/* history */}
-      <section>
-        <SectionLabel right={<Chip tone="ink">{isHR || isManager ? allRequests.length : myLeaves.length} pengajuan</Chip>}>
+      <section className="pb-2">
+        <SectionLabel right={<Chip tone="ink">{(isHR || isManager ? allRequests : myLeaves).length} pengajuan</Chip>}>
           {isHR || isManager ? "Semua Pengajuan" : "Pengajuan Saya"}
         </SectionLabel>
         {(isHR || isManager ? allRequests : myLeaves).length === 0 ? (
           <p className="card px-4 py-5 text-center text-[13px] font-semibold text-ink-400">Belum ada pengajuan.</p>
         ) : (
           <div className="card divide-y divide-ink-100/80">
-            {(isHR || isManager ? allRequests : myLeaves).map((lv) => (
-              <div key={lv.id} className="flex items-center gap-3 px-3.5 py-3">
+            {(isHR || isManager ? allRequests : myLeaves).map((lv, i) => (
+              <div key={lv.id} className="tile-pop flex items-center gap-3 px-3.5 py-3" style={{ animationDelay: `${i * 40}ms` }}>
                 <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
                   lv.status === "approved" ? "bg-ok-100 text-ok-600" : lv.status === "rejected" ? "bg-danger-100 text-danger-600" : "bg-sky-100 text-sky-600"
                 }`}>

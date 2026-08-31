@@ -44,7 +44,7 @@ export default function AuditView() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 pb-2">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="font-display text-[26px] leading-tight font-extrabold text-ink-900">Audit</h1>

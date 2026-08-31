@@ -52,6 +52,7 @@ export const IconWallet = (p: P) => base(p, <><path d="M3 7.5A2.5 2.5 0 0 1 5.5 
 export const IconFlame = (p: P) => base(p, <path d="M12 3c1.1 3.2-3.2 4.8-3.2 8.4a3.2 3.2 0 0 0 6.4.3c0-1.6 1.8-2.5 1.8.3a5 5 0 0 1-10 0C7 7.4 11 6.4 12 3Z" />);
 export const IconSmartphone = (p: P) => base(p, <><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M10.5 18.5h3" /></>);
 export const IconStar = (p: P) => base(p, <path d="m12 3.2 2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.6l-5.2 2.8 1-5.9-4.3-4.1 5.9-.8L12 3.2Z" />);
+export const IconGrid = (p: P) => base(p, <><rect x="4" y="4" width="7" height="7" rx="1.8" /><rect x="13" y="4" width="7" height="7" rx="1.8" /><rect x="4" y="13" width="7" height="7" rx="1.8" /><rect x="13" y="13" width="7" height="7" rx="1.8" /></>);
 export const IconMail = (p: P) => base(p, <><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="m3.5 7 8.5 6 8.5-6" /></>);
 export const IconEye = (p: P) => base(p, <><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></>);
 export const IconEyeOff = (p: P) => base(p, <><path d="M4 4l16 16" /><path d="M9.9 5.9A9.4 9.4 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17.5 17.5 0 0 1-3.2 3.9M6.1 8A17 17 0 0 0 2.5 12S6 18.5 12 18.5c1.2 0 2.3-.3 3.3-.7" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></>);

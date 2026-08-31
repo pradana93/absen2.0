@@ -6,12 +6,12 @@
 import { uid } from "./format";
 
 export interface JwtPayload {
-  sub: string;      // staffId
+  sub: string;
   name: string;
   role: string;
   tenant: string;
-  iat: number;      // seconds
-  exp: number;      // seconds
+  iat: number;
+  exp: number;
   typ: "access" | "refresh";
   jti: string;
 }
@@ -33,7 +33,6 @@ async function sign(data: string): Promise<string> {
     const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
     return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=+$/, "");
   } catch {
-    // insecure context fallback — deterministic local signature
     let h = 5381;
     for (let i = 0; i < data.length; i++) h = ((h << 5) + h + data.charCodeAt(i)) | 0;
     return `fb${(h >>> 0).toString(36)}`;
@@ -55,29 +54,18 @@ const REFRESH_TTL = 7 * 86400; // 7 days
 
 export function issueTokens(emp: { staffId: string; name: string; role: string }, tenant: string): TokenPair {
   const now = Math.floor(Date.now() / 1000);
-  const mk = async (typ: "access" | "refresh", ttl: number): Promise<string> => {
+  const mk = (typ: "access" | "refresh", ttl: number): string => {
     const payload: JwtPayload = {
       sub: emp.staffId, name: emp.name, role: emp.role, tenant,
       iat: now, exp: now + ttl, typ, jti: uid("jwt"),
     };
     const body = `${b64(JSON.stringify({ alg: "HS256", typ: "JWT" }))}.${b64(JSON.stringify(payload))}`;
-    const sig = await sign(body);
-    return `${body}.${sig}`;
+    void sign(body); // signature computed async; demo verifies on parse only
+    return `${body}.local-sig`;
   };
-  // issue synchronously with pending signatures; replaced once signed
-  const accessBody = `${b64(JSON.stringify({ alg: "HS256", typ: "JWT" }))}.${b64(JSON.stringify({
-    sub: emp.staffId, name: emp.name, role: emp.role, tenant,
-    iat: now, exp: now + ACCESS_TTL, typ: "access", jti: uid("jwt"),
-  } as JwtPayload))}`;
-  const refreshBody = `${b64(JSON.stringify({ alg: "HS256", typ: "JWT" }))}.${b64(JSON.stringify({
-    sub: emp.staffId, name: emp.name, role: emp.role, tenant,
-    iat: now, exp: now + REFRESH_TTL, typ: "refresh", jti: uid("jwt"),
-  } as JwtPayload))}`;
-  void mk("access", ACCESS_TTL);
-  void mk("refresh", REFRESH_TTL);
   return {
-    access: `${accessBody}.local-sig`,
-    refresh: `${refreshBody}.local-sig`,
+    access: mk("access", ACCESS_TTL),
+    refresh: mk("refresh", REFRESH_TTL),
     accessExp: (now + ACCESS_TTL) * 1000,
     refreshExp: (now + REFRESH_TTL) * 1000,
   };

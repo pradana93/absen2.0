@@ -1,20 +1,20 @@
 /**
- * Pengguna (Admin) — directory, account wizard with credential handoff,
- * edit modal (full CRUD incl. salary & status), password reset,
- * device unbind (Super Admin), delete.
+ * Pengguna (Admin) — directory with search/filter, account wizard with
+ * credential handoff, edit modal (full CRUD incl. salary & status),
+ * password reset, device unbind (Super Admin), delete.
  *
- * IMPORTANT: new accounts are NOT pre-bound to any device — binding happens
- * at the account's FIRST login (see store.login). Pre-binding here would
- * lock new staff out of their own phones.
+ * IMPORTANT: new accounts are NOT pre-bound to any device — the binding
+ * happens at the account's FIRST login (see store.login). Pre-binding here
+ * would lock new staff out of their own phones.
  */
 import { useMemo, useState } from "react";
 import { useApp } from "../lib/store";
 import {
   DEPARTMENTS, EMAIL_DOMAIN, EMAIL_RE, Employee, EmpStatus, genPassword, nextStaffId,
-  ROLE_LABEL, Role, SalaryStructure, Shift, slugEmail, STATUS_LABEL,
+  ROLE_LABEL, Role, SalaryStructure, Shift, seedShifts, STATUS_LABEL,
 } from "../lib/database";
 import { extractSignature, FaceSignature } from "../lib/faceEngine";
-import { idr, relTime, todayKey, uid, wibDayKey } from "../lib/format";
+import { idr, relTime, todayKey, wibDayKey } from "../lib/format";
 import CameraCapture from "../components/CameraCapture";
 import { useToast } from "../components/Toast";
 import { Banner, Chip, ConfirmButton, EmptyState, InitialsAvatar, Modal } from "../components/bits";
@@ -25,14 +25,6 @@ import {
 const ROLE_OPTIONS: Role[] = ["employee", "manager", "companyadmin", "superadmin"];
 const STATUS_OPTIONS: EmpStatus[] = ["active", "inactive", "resigned"];
 type ShiftId = string;
-
-interface EditForm {
-  name: string; nik: string; phone: string; address: string;
-  emergencyName: string; emergencyPhone: string;
-  department: string; position: string; shiftId: string;
-  status: EmpStatus; role: Role;
-  salary: SalaryStructure;
-}
 
 export default function EmployeesView() {
   const { session, employees, logs, shifts, engine, addEmployee, updateEmployee, removeEmployee, unbindDevice, audit } = useApp();
@@ -97,7 +89,7 @@ export default function EmployeesView() {
     setErr(""); setPhoto(null); setSig(null);
   };
 
-  const suggestedEmail = emailTouched ? email : slugEmail(name || "staff", employees.map((e) => e.email));
+  const suggestedEmail = emailTouched ? email : name.trim() ? `${name.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s]/g, "").split(/\s+/).slice(0, 2).join(".")}@${EMAIL_DOMAIN}` : "";
 
   const submitData = () => {
     if (name.trim().length < 3) return setErr("Nama minimal 3 karakter.");
@@ -127,13 +119,18 @@ export default function EmployeesView() {
       address: "—",
       emergencyName: "—",
       emergencyPhone: "—",
-      department, position: "Staff", role,
+      department,
+      position: role === "employee" ? "Staff" : ROLE_LABEL[role],
+      role,
       shiftId: shift,
       status: "active",
-      salary: { basic: role === "employee" ? 5_200_000 : 8_000_000, transport: 20_000, meal: 15_000, otPerHour: 30_000 },
+      salary: {
+        basic: role === "employee" ? 5_200_000 : role === "manager" ? 8_000_000 : 9_500_000,
+        transport: 20_000, meal: 15_000, otPerHour: role === "employee" ? 30_000 : 45_000,
+      },
       photo, descriptor: sig?.descriptor ?? null, hash: sig?.hash ?? null,
       createdAt: Date.now(),
-      deviceId: null, deviceBoundAt: null, // bound at FIRST LOGIN, never here
+      deviceId: null, deviceBoundAt: null, // bound at first login — never here
     };
     addEmployee(emp);
     audit("USER_CREATE", emp.staffId, `Akun ${emp.name} (${department} · ${ROLE_LABEL[role]}) dibuat`);
@@ -143,11 +140,11 @@ export default function EmployeesView() {
     startWizard();
   };
 
-  const steps = ["Data Diri", "Foto Wajah"];
+  const steps = ["Data Diri", "Foto Wajah", "Selesai"];
 
   /* ------------------------------ edit modal ------------------------------ */
   const [edit, setEdit] = useState<Employee | null>(null);
-  const [eForm, setEForm] = useState<EditForm | null>(null);
+  const [eForm, setEForm] = useState<Partial<Omit<Employee, "salary">> & { salary?: Partial<SalaryStructure> }>({});
   const openEdit = (e: Employee) => {
     setEdit(e);
     setEForm({
@@ -159,14 +156,21 @@ export default function EmployeesView() {
     });
   };
   const saveEdit = () => {
-    if (!edit || !eForm) return;
-    updateEmployee(edit.staffId, { ...eForm });
+    if (!edit) return;
+    const { salary, ...rest } = eForm;
+    const mergedSalary: SalaryStructure = {
+      basic: salary?.basic ?? edit.salary.basic,
+      transport: salary?.transport ?? edit.salary.transport,
+      meal: salary?.meal ?? edit.salary.meal,
+      otPerHour: salary?.otPerHour ?? edit.salary.otPerHour,
+    };
+    updateEmployee(edit.staffId, { ...rest, salary: mergedSalary } as Partial<Employee>);
     audit("USER_UPDATE", edit.staffId, `Profil ${edit.name} diperbarui`);
-    toast.push("ok", "Profil disimpan", `${eForm.name} diperbarui.`);
+    toast.push("ok", "Profil disimpan", `${edit.name} diperbarui.`);
     setEdit(null);
   };
 
-  const shiftList: Shift[] = shifts;
+  const shiftList: Shift[] = shifts.length ? shifts : seedShifts();
 
   return (
     <div className="space-y-5">
@@ -192,7 +196,7 @@ export default function EmployeesView() {
                   {step > i + 1 ? <IconCheck size={13} /> : i + 1}
                 </span>
                 <span className={`hidden text-[11px] font-extrabold tracking-wide uppercase min-[380px]:block ${step === i + 1 ? "text-ink-900" : "text-ink-400"}`}>{s}</span>
-                {i < 1 && <span className={`h-0.5 flex-1 rounded ${step > i + 1 ? "bg-ok-500" : "bg-ink-200"}`} />}
+                {i < 2 && <span className={`h-0.5 flex-1 rounded ${step > i + 1 ? "bg-ok-500" : "bg-ink-200"}`} />}
               </div>
             ))}
             <button onClick={() => setOpen(false)} className="ml-1 cursor-pointer rounded-lg p-1.5 text-ink-400 hover:bg-ink-100" aria-label="Tutup">
@@ -333,8 +337,8 @@ export default function EmployeesView() {
         />
       ) : (
         <div className="space-y-2.5">
-          {filtered.map((e) => (
-            <div key={e.staffId} className={`card card-press flex items-center gap-3 p-3.5 ${e.status !== "active" ? "opacity-60" : ""}`}>
+          {filtered.map((e, i) => (
+            <div key={e.staffId} className={`tile-pop card card-press flex items-center gap-3 p-3.5 ${e.status !== "active" ? "opacity-60" : ""}`} style={{ animationDelay: `${i * 40}ms` }}>
               <div className="relative">
                 <InitialsAvatar name={e.name} photo={e.photo} seedKey={e.staffId} size="h-12 w-12 text-[16px]" />
                 <span
@@ -402,7 +406,7 @@ export default function EmployeesView() {
               Serahkan kredensial ini langsung ke {credModal.name}. Kata sandi tidak ditampilkan lagi.
             </Banner>
             <div className="space-y-2 rounded-2xl bg-ink-900 p-4 font-mono text-[13px] text-white">
-              <p className="flex justify-between gap-3"><span className="text-white/50">Email</span><span className="break-all font-bold">{credModal.email}</span></p>
+              <p className="flex justify-between gap-3"><span className="text-white/50">Email</span><span className="font-bold break-all">{credModal.email}</span></p>
               <p className="flex justify-between gap-3"><span className="text-white/50">Sandi</span><span className="font-bold tracking-wider">{credModal.password}</span></p>
             </div>
             <button className="btn-sun w-full" onClick={() => void copyCred()}>
@@ -413,33 +417,33 @@ export default function EmployeesView() {
       </Modal>
 
       {/* edit modal */}
-      <Modal open={!!edit && !!eForm} onClose={() => setEdit(null)} title={`Edit — ${edit?.name ?? ""}`} wide>
-        {edit && eForm && (
+      <Modal open={!!edit} onClose={() => setEdit(null)} title={`Edit — ${edit?.name ?? ""}`} wide>
+        {edit && (
           <div className="space-y-3.5">
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <label className="label">Nama</label>
-                <input className="input !py-2.5 text-sm" value={eForm.name} onChange={(e) => setEForm({ ...eForm, name: e.target.value })} />
+                <input className="input !py-2.5 text-sm" value={eForm.name ?? ""} onChange={(e) => setEForm({ ...eForm, name: e.target.value })} />
               </div>
               <div>
                 <label className="label">NIK</label>
-                <input className="input !py-2.5 font-mono text-sm" value={eForm.nik} onChange={(e) => setEForm({ ...eForm, nik: e.target.value })} />
+                <input className="input !py-2.5 font-mono text-sm" value={eForm.nik ?? ""} onChange={(e) => setEForm({ ...eForm, nik: e.target.value })} />
               </div>
               <div>
                 <label className="label">Telepon</label>
-                <input className="input !py-2.5 font-mono text-sm" value={eForm.phone} onChange={(e) => setEForm({ ...eForm, phone: e.target.value })} />
+                <input className="input !py-2.5 font-mono text-sm" value={eForm.phone ?? ""} onChange={(e) => setEForm({ ...eForm, phone: e.target.value })} />
               </div>
               <div className="col-span-2">
                 <label className="label">Alamat</label>
-                <input className="input !py-2.5 text-sm" value={eForm.address} onChange={(e) => setEForm({ ...eForm, address: e.target.value })} />
+                <input className="input !py-2.5 text-sm" value={eForm.address ?? ""} onChange={(e) => setEForm({ ...eForm, address: e.target.value })} />
               </div>
               <div>
                 <label className="label">Kontak darurat</label>
-                <input className="input !py-2.5 text-sm" value={eForm.emergencyName} onChange={(e) => setEForm({ ...eForm, emergencyName: e.target.value })} />
+                <input className="input !py-2.5 text-sm" value={eForm.emergencyName ?? ""} onChange={(e) => setEForm({ ...eForm, emergencyName: e.target.value })} />
               </div>
               <div>
                 <label className="label">Telp. darurat</label>
-                <input className="input !py-2.5 font-mono text-sm" value={eForm.emergencyPhone} onChange={(e) => setEForm({ ...eForm, emergencyPhone: e.target.value })} />
+                <input className="input !py-2.5 font-mono text-sm" value={eForm.emergencyPhone ?? ""} onChange={(e) => setEForm({ ...eForm, emergencyPhone: e.target.value })} />
               </div>
               <div>
                 <label className="label">Departemen</label>
@@ -449,7 +453,7 @@ export default function EmployeesView() {
               </div>
               <div>
                 <label className="label">Jabatan</label>
-                <input className="input !py-2.5 text-sm" value={eForm.position} onChange={(e) => setEForm({ ...eForm, position: e.target.value })} />
+                <input className="input !py-2.5 text-sm" value={eForm.position ?? ""} onChange={(e) => setEForm({ ...eForm, position: e.target.value })} />
               </div>
               <div>
                 <label className="label">Shift</label>
@@ -473,6 +477,7 @@ export default function EmployeesView() {
               )}
             </div>
 
+            {/* salary structure */}
             <div className="rounded-2xl border border-ink-100 bg-ink-50 p-3.5">
               <p className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold tracking-wide text-ink-500 uppercase">
                 <IconShield size={13} /> Struktur Gaji (untuk slip otomatis)
@@ -488,13 +493,13 @@ export default function EmployeesView() {
                     <label className="label">{label}</label>
                     <input
                       type="number" step={1000} className="input !py-2 font-mono text-[13px]"
-                      value={eForm.salary[key]}
-                      onChange={(e) => setEForm({ ...eForm, salary: { ...eForm.salary, [key]: Math.max(0, Number(e.target.value)) } })}
+                      value={eForm.salary?.[key] ?? 0}
+                      onChange={(e) => setEForm({ ...eForm, salary: { ...eForm.salary, [key]: Math.max(0, Number(e.target.value)) } as Partial<SalaryStructure> })}
                     />
                   </div>
                 ))}
               </div>
-              <p className="mt-2 text-[10.5px] font-bold text-ink-400">Pratinjau pokok: {idr(eForm.salary.basic)} / bulan</p>
+              <p className="mt-2 text-[10.5px] font-bold text-ink-400">Pratinjau pokok: {idr(eForm.salary?.basic ?? 0)} / bulan</p>
             </div>
 
             <div className="flex items-center justify-between rounded-2xl border border-ink-100 px-3.5 py-2.5">
@@ -505,7 +510,6 @@ export default function EmployeesView() {
             </div>
 
             <button className="btn-sun w-full" onClick={saveEdit}><IconCheck size={16} /> Simpan Perubahan</button>
-            <span className="hidden">{uid("x")}</span>
           </div>
         )}
       </Modal>
