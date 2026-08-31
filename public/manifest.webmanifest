@@ -1,0 +1,15 @@
+{
+  "name": "Vittoria HR — Absensi Wajah & Geofencing",
+  "short_name": "Vittoria HR",
+  "description": "Absensi wajah 128-D dengan geofencing GPS, cuti, penggajian, dan manajemen SDM multi-peran.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F6FB",
+  "theme_color": "#F4F6FB",
+  "orientation": "portrait",
+  "lang": "id",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
