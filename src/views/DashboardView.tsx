@@ -235,7 +235,7 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
         </div>
       </button>
 
-      <div className="grid grid-cols-4 gap-2.5">
+      <div className="grid grid-cols-2 gap-2.5 min-[420px]:grid-cols-4">
         <StatTile label="Hadir" value={kpi.hadir} tone="ok" sub={`dari ${activeStaff.length}`} />
         <StatTile label="Telat" value={kpi.late} tone="warn" sub="hari ini" />
         <StatTile label="Cuti" value={kpi.cuti} tone="sky" sub="disetujui" />
