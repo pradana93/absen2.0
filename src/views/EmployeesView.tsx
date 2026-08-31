@@ -10,7 +10,7 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../lib/store";
 import {
-  DEPARTMENTS, EMAIL_DOMAIN, EMAIL_RE, Employee, EmpStatus, genPassword, nextStaffId,
+  EMAIL_DOMAIN, EMAIL_RE, Employee, EmpStatus, genPassword, nextStaffId,
   ROLE_LABEL, Role, SalaryStructure, Shift, seedShifts, STATUS_LABEL,
 } from "../lib/database";
 
@@ -26,7 +26,7 @@ const STATUS_OPTIONS: EmpStatus[] = ["active", "inactive", "resigned"];
 type ShiftId = string;
 
 export default function EmployeesView() {
-  const { session, employees, logs, shifts, sites, activeSite, engine, addEmployee, updateEmployee, removeEmployee, unbindDevice, audit } = useApp();
+  const { session, employees, logs, shifts, sites, activeSite, engine, departments, salaryDefaults, addEmployee, updateEmployee, removeEmployee, unbindDevice, audit } = useApp();
   const toast = useToast();
   const isSuper = session?.role === "superadmin";
 
@@ -72,7 +72,7 @@ export default function EmployeesView() {
   const [email, setEmail] = useState("");
   const [emailTouched, setEmailTouched] = useState(false);
   const [password, setPassword] = useState(genPassword());
-  const [department, setDepartment] = useState(DEPARTMENTS[0]);
+  const [department, setDepartment] = useState(departments[0] ?? "Gudang");
   const [role, setRole] = useState<Role>("employee");
   const [shift, setShift] = useState<ShiftId>("sh-pagi");
   const [fSite, setFSite] = useState<string | null>(activeSite?.id ?? null);
@@ -81,7 +81,7 @@ export default function EmployeesView() {
     setOpen(true); setStep(1);
     setName(""); setStaffId(nextStaffId(employees));
     setEmail(""); setEmailTouched(false); setPassword(genPassword());
-    setDepartment(DEPARTMENTS[0]); setRole("employee"); setShift("sh-pagi");
+    setDepartment(departments[0] ?? "Gudang"); setRole("employee"); setShift("sh-pagi");
     setFSite(activeSite?.id ?? null);
     setErr("");
   };
@@ -227,7 +227,7 @@ export default function EmployeesView() {
                   <div>
                     <label className="label">Departemen</label>
                     <select className="input" value={department} onChange={(e) => setDepartment(e.target.value)}>
-                      {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                      {departments.map((d) => <option key={d} value={d}>{d}</option>)}
                     </select>
                   </div>
                   <div>
@@ -278,7 +278,7 @@ export default function EmployeesView() {
       <div className="space-y-2.5">
         <input className="input !py-2.5 text-sm" placeholder="Cari nama, staff ID, atau email…" value={search} onChange={(e) => setSearch(e.target.value)} />
         <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-          {["Semua", ...DEPARTMENTS].map((d) => (
+          {["Semua", ...departments].map((d) => (
             <button key={d} onClick={() => setDept(d)} className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-[12px] font-extrabold transition ${
               dept === d ? "bg-ink-900 text-white shadow" : "border border-ink-100 bg-white text-ink-500 hover:border-ink-200"
             }`}>

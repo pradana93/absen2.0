@@ -291,7 +291,7 @@ function save(key: string, value: unknown) {
 }
 
 export function clearAll() {
-  ["employees", "logs", "settings", "seeded", "company", "shifts", "leaves", "breaks", "audit", "notifs", "session", "payslips", "org", "sites", "sitechoice", "board"].forEach((k) =>
+  ["employees", "logs", "settings", "seeded", "company", "shifts", "leaves", "breaks", "audit", "notifs", "session", "payslips", "org", "sites", "sitechoice", "board", "departments", "quotas", "salarydefaults", "resets"].forEach((k) =>
     localStorage.removeItem(NS + k),
   );
 }
@@ -385,7 +385,38 @@ export const db = {
   saveSites: (v: Site[]) => save("sites", v),
   loadSiteChoice: () => load<string | null>("sitechoice", null),
   saveSiteChoice: (v: string | null) => save("sitechoice", v),
+  loadDepartments: () => load<string[]>("departments", []),
+  saveDepartments: (v: string[]) => save("departments", v),
+  loadQuotas: () => load<Record<LeaveType, number>>("quotas", { ...LEAVE_QUOTAS }),
+  saveQuotas: (v: Record<LeaveType, number>) => save("quotas", v),
+  loadSalaryDefaults: () => load<Record<Role, SalaryStructure>>("salarydefaults", JSON.parse(JSON.stringify(SEED_SALARY))),
+  saveSalaryDefaults: (v: Record<Role, SalaryStructure>) => save("salarydefaults", v),
+  loadResets: () => load<ResetToken[]>("resets", []),
+  saveResets: (v: ResetToken[]) => save("resets", v),
 };
+
+/* --------------------- forgot-password reset tokens ---------------------- */
+export interface ResetToken {
+  token: string;
+  staffId: string;
+  email: string;
+  exp: number; // ms epoch
+  used: boolean;
+}
+
+/* ------------------- master data export/import contract ------------------ */
+export interface MasterPayload {
+  app?: string;
+  version?: string;
+  exportedAt?: number;
+  company?: Partial<Company>;
+  sites?: Site[];
+  departments?: string[];
+  shifts?: Shift[];
+  employees?: Employee[];
+  leaveQuotas?: Record<LeaveType, number>;
+  salaryDefaults?: Record<Role, SalaryStructure>;
+}
 export const KEY_SITES = NS + "sites";
 
 /* ------------------------------- helpers --------------------------------- */

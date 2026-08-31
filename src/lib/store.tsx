@@ -6,7 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyBrand, AttendanceLog, AuditLog, BoardPost, BreakRec, clearAll, Company, db, Employee, ensureFreshVersion,
-  KEY_COMPANY, KEY_SITES, LeaveRequest, Notif, OrgNode, Payslip, Role, seedAudit, seedCompany,
+  KEY_COMPANY, KEY_SITES, LeaveRequest, LeaveType, MasterPayload, Notif, OrgNode, Payslip, ResetToken, Role, SalaryStructure, seedAudit, seedCompany,
   seedBoardPosts, seedEmployees, seedLeaves, seedLogs, seedNotifs, seedOrgNodes, seedShifts, seedSites, Settings, Shift,
   Site, TenantIdentity,
 } from "./database";
@@ -65,6 +65,20 @@ interface AppState {
   postBoard: (p: { siteId: string | null; title: string; body: string; tone: BoardPost["tone"] }) => void;
   ackBoard: (id: string) => void;
   deleteBoard: (id: string) => void;
+  /* master data (Super Admin vault) */
+  departments: string[];
+  leaveQuotas: Record<LeaveType, number>;
+  salaryDefaults: Record<Role, SalaryStructure>;
+  addDepartment: (name: string) => boolean;
+  renameDepartment: (oldName: string, newName: string) => boolean;
+  removeDepartment: (name: string) => boolean;
+  updateLeaveQuota: (t: LeaveType, days: number) => void;
+  updateSalaryDefault: (r: Role, patch: Partial<SalaryStructure>) => void;
+  importMasterData: (payload: MasterPayload) => string[];
+  /* forgot password */
+  requestReset: (email: string) => { ok: boolean; error?: string; token?: ResetToken };
+  consumeReset: (token: string) => { ok: boolean; error?: string; name?: string };
+  resetPassword: (token: string, newPass: string) => { ok: boolean; error?: string };
   addShift: (s: Shift) => void;
   updateShift: (id: string, patch: Partial<Shift>) => void;
   removeShift: (id: string) => void;
@@ -243,6 +257,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const removeSite = useCallback((id: string): boolean => {
     const used = employeesRef.current.some((e) => e.siteId === id);
     if (used) return false;
+    const st = sitesRef.current.find((s) => s.id === id);
     setSites((prev) => prev.filter((s) => s.id !== id));
     setOrg((prev) => prev.filter((n) => n.siteId !== id));
     setLogs((prev) => prev.filter((l) => l.siteId !== id));
@@ -254,6 +269,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       return cur;
     });
+    const actor = sessionRef.current ? employeesRef.current.find((e) => e.staffId === sessionRef.current?.staffId) : null;
+    setAudits((prev) => [{
+      id: uid("aud"), ts: Date.now(), actorId: actor?.staffId ?? "system", actorName: actor?.name ?? "Sistem",
+      role: (actor?.role ?? "system") as AuditLog["role"],
+      action: "MASTER_SITE_DELETE", target: id, detail: `Gudang "${st?.name ?? id}" dihapus beserta struktur & log-nya`,
+    }, ...prev]);
     return true;
   }, []);
 
@@ -587,6 +608,134 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, ...prev]);
   }, []);
 
+  /* ------------------------------ master data ----------------------------- */
+  const [departments, setDepartments] = useState<string[]>(() => {
+    const d = db.loadDepartments();
+    return d.length ? d : ["Gudang"];
+  });
+  const [leaveQuotas, setLeaveQuotas] = useState<Record<LeaveType, number>>(() => db.loadQuotas());
+  const [salaryDefaults, setSalaryDefaults] = useState<Record<Role, SalaryStructure>>(() => db.loadSalaryDefaults());
+  const [resets, setResets] = useState<ResetToken[]>(() => db.loadResets());
+
+  useEffect(() => db.saveDepartments(departments), [departments]);
+  useEffect(() => db.saveQuotas(leaveQuotas), [leaveQuotas]);
+  useEffect(() => db.saveSalaryDefaults(salaryDefaults), [salaryDefaults]);
+  useEffect(() => db.saveResets(resets), [resets]);
+
+  const departmentsRef = useRef(departments); departmentsRef.current = departments;
+  const shiftsRef = useRef(shifts); shiftsRef.current = shifts;
+  const quotasRef = useRef(leaveQuotas); quotasRef.current = leaveQuotas;
+  const salaryRef = useRef(salaryDefaults); salaryRef.current = salaryDefaults;
+
+  const masterAudit = useCallback((action: string, target: string, detail: string) => {
+    const actor = sessionRef.current ? employeesRef.current.find((e) => e.staffId === sessionRef.current?.staffId) : null;
+    setAudits((prev) => [{
+      id: uid("aud"), ts: Date.now(),
+      actorId: actor?.staffId ?? "system", actorName: actor?.name ?? "Sistem",
+      role: (actor?.role ?? "system") as AuditLog["role"],
+      action, target, detail,
+    }, ...prev]);
+  }, []);
+
+  const addDepartment = useCallback((name: string): boolean => {
+    const n = name.trim();
+    if (!n || departmentsRef.current.some((d) => d.toLowerCase() === n.toLowerCase())) return false;
+    setDepartments((prev) => [...prev, n]);
+    masterAudit("MASTER_DEPT_ADD", n, `Departemen "${n}" ditambahkan`);
+    return true;
+  }, [masterAudit]);
+
+  const renameDepartment = useCallback((oldName: string, newName: string): boolean => {
+    const n = newName.trim();
+    if (!n) return false;
+    setDepartments((prev) => prev.map((d) => (d === oldName ? n : d)));
+    setEmployees((prev) => prev.map((e) => (e.department === oldName ? { ...e, department: n } : e)));
+    masterAudit("MASTER_DEPT_RENAME", n, `"${oldName}" → "${n}" (karyawan ikut diperbarui)`);
+    return true;
+  }, [masterAudit]);
+
+  const removeDepartment = useCallback((name: string): boolean => {
+    const inUse = employeesRef.current.filter((e) => e.department === name).length;
+    if (inUse > 0) return false;
+    setDepartments((prev) => prev.filter((d) => d !== name));
+    masterAudit("MASTER_DEPT_DELETE", name, `Departemen "${name}" dihapus`);
+    return true;
+  }, [masterAudit]);
+
+  const updateLeaveQuota = useCallback((t: LeaveType, days: number) => {
+    setLeaveQuotas((prev) => ({ ...prev, [t]: Math.max(0, Math.round(days)) }));
+    masterAudit("MASTER_QUOTA", t, `Kuota ${t} → ${Math.max(0, Math.round(days))} hari`);
+  }, [masterAudit]);
+
+  const updateSalaryDefault = useCallback((r: Role, patch: Partial<SalaryStructure>) => {
+    setSalaryDefaults((prev) => ({ ...prev, [r]: { ...prev[r], ...patch } }));
+    masterAudit("MASTER_SALARY", r, `Struktur gaji default ${r} diperbarui`);
+  }, [masterAudit]);
+
+  /** Replace master collections from a validated payload; employees are upserted by staffId. */
+  const importMasterData = useCallback((payload: MasterPayload): string[] => {
+    const applied: string[] = [];
+    if (payload.company) { setCompany((prev) => ({ ...prev, ...payload.company })); applied.push("company"); }
+    if (Array.isArray(payload.sites)) { setSites(payload.sites); applied.push(`sites (${payload.sites.length})`); }
+    if (Array.isArray(payload.departments)) { setDepartments(payload.departments); applied.push(`departments (${payload.departments.length})`); }
+    if (Array.isArray(payload.shifts)) { setShifts(payload.shifts); applied.push(`shifts (${payload.shifts.length})`); }
+    if (payload.leaveQuotas) { setLeaveQuotas(payload.leaveQuotas); applied.push("leaveQuotas"); }
+    if (payload.salaryDefaults) { setSalaryDefaults(payload.salaryDefaults); applied.push("salaryDefaults"); }
+    if (Array.isArray(payload.employees)) {
+      setEmployees((prev) => {
+        const byId = new Map(prev.map((e) => [e.staffId, e]));
+        for (const e of payload.employees!) byId.set(e.staffId, e);
+        return [...byId.values()];
+      });
+      applied.push(`employees (upsert ${payload.employees.length})`);
+    }
+    masterAudit("MASTER_IMPORT", "masterdata", `Impor master data: ${applied.join(", ")}`);
+    return applied;
+  }, [masterAudit]);
+
+  /* ----------------------------- forgot password --------------------------- */
+  const requestReset = useCallback((email: string): { ok: boolean; error?: string; token?: ResetToken } => {
+    const key = email.trim().toLowerCase();
+    const emp = employeesRef.current.find((e) => e.email.toLowerCase() === key);
+    if (!emp) return { ok: false, error: "Email tidak terdaftar di direktori karyawan." };
+    // 60s cooldown per account
+    const recent = resets.find((r) => r.email.toLowerCase() === key && Date.now() - (r.exp - 30 * 60_000) < 60_000 && !r.used);
+    if (recent) return { ok: false, error: "Tautan reset masih aktif — cek kembali email Anda (berlaku 30 menit)." };
+    const token: ResetToken = {
+      token: `rst-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`,
+      staffId: emp.staffId, email: emp.email, exp: Date.now() + 30 * 60_000, used: false,
+    };
+    setResets((prev) => [...prev.filter((r) => !(r.email.toLowerCase() === key && !r.used)), token]);
+    setAudits((prev) => [{
+      id: uid("aud"), ts: Date.now(), actorId: emp.staffId, actorName: emp.name, role: emp.role,
+      action: "PASSWORD_RESET_REQUEST", target: emp.staffId, detail: "Tautan reset kata sandi diminta (berlaku 30 menit)",
+    }, ...prev]);
+    return { ok: true, token };
+  }, [resets]);
+
+  const consumeReset = useCallback((token: string): { ok: boolean; error?: string; name?: string } => {
+    const r = resets.find((x) => x.token === token.trim());
+    if (!r) return { ok: false, error: "Tautan reset tidak valid atau sudah dipakai." };
+    if (r.used) return { ok: false, error: "Tautan ini sudah dipakai. Minta tautan baru." };
+    if (Date.now() > r.exp) return { ok: false, error: "Tautan reset sudah kedaluwarsa (30 menit)." };
+    const emp = employeesRef.current.find((e) => e.staffId === r.staffId);
+    return { ok: true, name: emp?.name ?? r.email };
+  }, [resets]);
+
+  const resetPassword = useCallback((token: string, newPass: string): { ok: boolean; error?: string } => {
+    const r = resets.find((x) => x.token === token.trim());
+    if (!r || r.used || Date.now() > r.exp) return { ok: false, error: "Tautan reset tidak valid." };
+    if (newPass.length < 6) return { ok: false, error: "Kata sandi minimal 6 karakter." };
+    setEmployees((prev) => prev.map((e) => (e.staffId === r.staffId ? { ...e, password: newPass } : e)));
+    setResets((prev) => prev.map((x) => (x.token === r.token ? { ...x, used: true } : x)));
+    setAudits((prev) => [{
+      id: uid("aud"), ts: Date.now(), actorId: r.staffId, actorName: employeesRef.current.find((e) => e.staffId === r.staffId)?.name ?? r.staffId,
+      role: (employeesRef.current.find((e) => e.staffId === r.staffId)?.role ?? "employee") as AuditLog["role"],
+      action: "PASSWORD_RESET_SELF", target: r.staffId, detail: "Kata sandi diganti melalui tautan reset",
+    }, ...prev]);
+    return { ok: true };
+  }, [resets]);
+
   /* --------------------------------- shifts ------------------------------- */
   const addShift = useCallback((s: Shift) => setShifts((prev) => [...prev, s]), []);
   const updateShift = useCallback(
@@ -662,6 +811,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     issuePayslip, withdrawPayslip,
     addOrgNode, updateOrgNode, removeOrgNode,
     board, postBoard, ackBoard, deleteBoard,
+    departments, leaveQuotas, salaryDefaults,
+    addDepartment, renameDepartment, removeDepartment,
+    updateLeaveQuota, updateSalaryDefault, importMasterData,
+    requestReset, consumeReset, resetPassword,
     addShift, updateShift, removeShift,
     activeBreak, startBreak, endBreak,
     markNotifsRead,
