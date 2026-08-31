@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { useApp } from "../lib/store";
 import { extractSignature, FaceSignature } from "../lib/faceEngine";
+import { shrinkPhoto } from "../lib/database";
 import CameraCapture from "./CameraCapture";
 import { useToast } from "./Toast";
 import { Banner, Chip, InitialsAvatar } from "./bits";
@@ -21,9 +22,9 @@ export default function FaceEnrollGate({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
 
   const onCapture = async (canvas: HTMLCanvasElement, dataUrl: string) => {
-    setPhoto(dataUrl);
     setBusy(true);
     setSig(await extractSignature(canvas));
+    setPhoto(await shrinkPhoto(dataUrl, 360)); // compressed baseline — kind to device storage
     setBusy(false);
   };
 

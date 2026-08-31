@@ -11,6 +11,14 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Vittoria HR crash:", error, info.componentStack);
+    /* keep a forensic breadcrumb for the Master Data integrity panel */
+    try {
+      localStorage.setItem("vittoria:crashlog", JSON.stringify({
+        ts: Date.now(),
+        msg: String(error?.message ?? error).slice(0, 200),
+        stack: String(info.componentStack ?? "").slice(0, 400),
+      }));
+    } catch { /* storage unavailable */ }
   }
 
   render() {

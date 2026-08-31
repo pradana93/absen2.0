@@ -287,7 +287,40 @@ function load<T>(key: string, fallback: T): T {
   }
 }
 function save(key: string, value: unknown) {
-  try { localStorage.setItem(NS + key, JSON.stringify(value)); } catch { /* quota / private mode */ }
+  try {
+    localStorage.setItem(NS + key, JSON.stringify(value));
+  } catch {
+    /* quota / private mode — surface it so the UI can warn the user */
+    try { window.dispatchEvent(new CustomEvent("vittoria:storage-full", { detail: key })); } catch { /* noop */ }
+  }
+}
+
+/** Downscale a captured photo before persisting — keeps localStorage healthy. */
+export function shrinkPhoto(dataUrl: string, maxW = 360): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        if (img.width <= maxW) { resolve(dataUrl); return; }
+        const w = maxW;
+        const h = Math.max(1, Math.round((img.height / img.width) * w));
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        c.getContext("2d")!.drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL("image/jpeg", 0.72));
+      } catch { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+/** Crash log (written by the ErrorBoundary) for the integrity panel. */
+export function readCrashLog(): { ts: number; msg: string } | null {
+  try {
+    const raw = localStorage.getItem("vittoria:crashlog");
+    return raw ? (JSON.parse(raw) as { ts: number; msg: string }) : null;
+  } catch { return null; }
 }
 
 export function clearAll() {

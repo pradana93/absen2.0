@@ -4,7 +4,7 @@
  */
 import { useState } from "react";
 import { useApp } from "../lib/store";
-import { ROLE_LABEL } from "../lib/database";
+import { ROLE_LABEL, shrinkPhoto } from "../lib/database";
 import { extractSignature } from "../lib/faceEngine";
 import { idr, relTime, wibShortDate } from "../lib/format";
 import { shortDevice } from "../lib/device";
@@ -50,8 +50,9 @@ export default function ProfileView() {
   const onPhoto = async (canvas: HTMLCanvasElement, dataUrl: string) => {
     setSaving(true);
     const sig = await extractSignature(canvas);
+    const small = await shrinkPhoto(dataUrl, 360);
     updateEmployee(me.staffId, {
-      photo: dataUrl,
+      photo: small,
       descriptor: sig.descriptor ?? me.descriptor,
       hash: sig.hash ?? me.hash,
     });

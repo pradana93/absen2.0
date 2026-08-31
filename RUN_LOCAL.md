@@ -113,6 +113,7 @@ The Netlify URL is a **new origin**, so its `localStorage` starts empty (the app
 | Camera says "not allowed" | Browser permission or non-HTTPS context | Grant camera permission for the site; confirm the URL starts with `https://` |
 | GPS stuck on "mencari…" | Location permission denied, or desktop without GPS | Allow location; or enable **Simulasi GPS** in Sistem for demos |
 | Deploy log fails at `npm install` | Lockfile conflict | In Netlify: Site configuration → Build → clear cache and redeploy |
+| "Powered by Netlify" badge near the dock | Free-plan branding overlay (can't be hidden — Netlify ToS) | Already handled: the dock auto-lifts above it (`--dock-lift` in `src/index.css`). To remove the badge entirely, upgrade to the Pro plan |
 
 Cloudflare Pages & Vercel: alurnya identik (import repo → framework preset "Vite" → deploy; `netlify.toml` diabaikan — set build `npm run build`, output `dist` di UI mereka).
 

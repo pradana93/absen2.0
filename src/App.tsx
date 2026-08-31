@@ -3,7 +3,7 @@
  * Fitur bottom sheet (grouped secondary modules), notification bell,
  * global announcement, maintenance mode, PWA install banner, onboarding.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { AppProvider, useApp } from "./lib/store";
 import { AttendanceType, ROLE_LABEL, Role, SITE_STYLE } from "./lib/database";
 import { fmtExpLeft } from "./lib/jwt";
@@ -17,20 +17,23 @@ import LoginView from "./views/LoginView";
 import HomeView from "./views/HomeView";
 import DashboardView from "./views/DashboardView";
 import AttendView from "./views/AttendView";
-import HistoryView from "./views/HistoryView";
 import EmployeesView from "./views/EmployeesView";
 import CutiView from "./views/CutiView";
-import PayslipView from "./views/PayslipView";
 import ProfileView from "./views/ProfileView";
-import SettingsView from "./views/SettingsView";
-import AuditView from "./views/AuditView";
 import OrgView from "./views/OrgView";
-import LiveOpsView from "./views/LiveOpsView";
 import PengumumanView from "./views/PengumumanView";
-import MasterDataView, { LockedVault } from "./views/MasterDataView";
+/* heavy / role-specific modules load on demand (Leaflet, tables, vault) */
+const HistoryView = lazy(() => import("./views/HistoryView"));
+const PayslipView = lazy(() => import("./views/PayslipView"));
+const SettingsView = lazy(() => import("./views/SettingsView"));
+const AuditView = lazy(() => import("./views/AuditView"));
+const LiveOpsView = lazy(() => import("./views/LiveOpsView"));
+const MasterDataView = lazy(() => import("./views/MasterDataView"));
+
+export const APP_VERSION = "v6.3";
 import {
   IconArrowRight, IconBell, IconBriefcase, IconBuilding, IconCamera, IconClipboard, IconCpu, IconDatabase,
-  IconGear, IconGrid, IconHistory, IconHome, IconLogoutIn, IconShield, IconSignal, IconUsers, IconX,
+  IconGear, IconGrid, IconHistory, IconHome, IconLock, IconLogo, IconLogoutIn, IconShield, IconSignal, IconUsers, IconX,
 } from "./components/icons";
 
 export type ViewId =
@@ -258,6 +261,21 @@ function Shell() {
   const [faceDone, setFaceDone] = useState(false);
   useEffect(() => setFaceDone(false), [session?.staffId]);
 
+  /* warn once when the JWT session is about to expire */
+  const warnedRef = useRef(false);
+  useEffect(() => { warnedRef.current = false; }, [session?.staffId]);
+  useEffect(() => {
+    if (!session) return;
+    const iv = window.setInterval(() => {
+      const left = tokenExp - Date.now();
+      if (left > 0 && left <= 5 * 60_000 && !warnedRef.current) {
+        warnedRef.current = true;
+        toast.push("warn", "Sesi hampir berakhir", "Sekitar 5 menit tersisa — Anda akan keluar otomatis demi keamanan.");
+      }
+    }, 20_000);
+    return () => window.clearInterval(iv);
+  }, [session?.staffId, tokenExp, toast]);
+
   /* first-login onboarding tour */
   const [tour, setTour] = useState(false);
   useEffect(() => {
@@ -357,16 +375,22 @@ function Shell() {
 
   /* Ruang Kendali — full-bleed dark ops board (escapes the phone frame) */
   if (view === "kendali") {
-    return <LiveOpsView onExit={() => nav(HOME[role])} />;
+    return (
+      <Suspense fallback={<FullScreenLoader />}>
+        <LiveOpsView onExit={() => nav(HOME[role])} />
+      </Suspense>
+    );
   }
 
   /* Master Data — Super Admin vault (wide canvas for tables) */
   if (view === "masterdata") {
-    if (role !== "superadmin") return <LockedVault />;
+    if (role !== "superadmin") return <LockedScreen onBack={() => nav(HOME[role])} />;
     return (
       <div className="app-bg min-h-dvh">
         <div className="mx-auto w-full max-w-3xl px-4 py-6">
-          <MasterDataView />
+          <Suspense fallback={<ViewLoader />}>
+            <MasterDataView />
+          </Suspense>
           <button className="btn-ghost mx-auto mt-4 flex !py-2.5 !text-[13px]" onClick={() => nav(HOME[role])}>
             <IconArrowRight size={14} className="rotate-180" /> Kembali ke Dashboard
           </button>
@@ -449,13 +473,13 @@ function Shell() {
             {view === "home" && <HomeView nav={nav} />}
             {view === "dashboard" && <DashboardView nav={nav} />}
             {view === "absen" && <AttendView initialType={initialType} />}
-            {view === "riwayat" && <HistoryView />}
+            {view === "riwayat" && <Suspense fallback={<ViewLoader />}><HistoryView /></Suspense>}
             {view === "pengguna" && <EmployeesView />}
             {view === "cuti" && <CutiView />}
-            {view === "gaji" && <PayslipView />}
+            {view === "gaji" && <Suspense fallback={<ViewLoader />}><PayslipView /></Suspense>}
             {view === "profil" && <ProfileView />}
-            {view === "aturan" && <SettingsView />}
-            {view === "audit" && <AuditView />}
+            {view === "aturan" && <Suspense fallback={<ViewLoader />}><SettingsView /></Suspense>}
+            {view === "audit" && <Suspense fallback={<ViewLoader />}><AuditView /></Suspense>}
             {view === "org" && <OrgView />}
             {view === "pengumuman" && <PengumumanView />}
           </div>
@@ -463,7 +487,7 @@ function Shell() {
 
         {/* PWA install banner (yield to the geofence warning when both apply) */}
         {installEvt && !installGone && !(fence && !fence.inside && view !== "absen") && (
-          <div className="fixed inset-x-0 bottom-24 z-30 flex justify-center px-4 print:hidden">
+          <div className="above-dock fixed inset-x-0 z-30 flex justify-center px-4 print:hidden">
             <div className={`anim-fade-up flex w-full ${SHELL_W} items-center gap-3 rounded-2xl border border-ink-100 bg-white/95 p-3 shadow-[0_18px_48px_rgba(23,42,89,0.22)] backdrop-blur`}>
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-sun-400 to-sun-600 text-white shadow-[0_8px_18px_rgba(240,115,0,0.4)]">
                 <IconGrid size={18} />
@@ -516,7 +540,7 @@ function Shell() {
         </nav>
 
         {fence && !fence.inside && view !== "absen" && (
-          <div className="pointer-events-none fixed inset-x-0 bottom-24 z-30 flex justify-center px-4">
+          <div className="above-dock pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4">
             <div className="anim-fade-up rounded-full bg-danger-500/95 px-4 py-2 text-[11.5px] font-extrabold text-white shadow-lg backdrop-blur">
               <IconShield size={12} className="mr-1 inline" /> Di luar radius gudang — absensi akan ditolak
             </div>
@@ -531,6 +555,79 @@ function Shell() {
       </div>
     </div>
   );
+}
+
+/* Branded loader while a lazy module streams in. */
+function ViewLoader() {
+  return (
+    <div className="grid place-items-center py-24">
+      <div className="relative flex flex-col items-center gap-5">
+        <span className="halo-pulse absolute -inset-3 rounded-full bg-sun-400/40" aria-hidden />
+        <span className="orbit absolute -inset-7 rounded-full border-2 border-dashed border-sun-300/60" aria-hidden />
+        <IconLogo size={54} className="anim-pop relative" />
+        <p className="anim-blink text-[10.5px] font-extrabold tracking-[0.22em] text-ink-400 uppercase">Memuat modul…</p>
+      </div>
+    </div>
+  );
+}
+
+function FullScreenLoader() {
+  return (
+    <div className="ops-bg grid min-h-dvh place-items-center">
+      <div className="relative flex flex-col items-center gap-5">
+        <span className="orbit absolute -inset-8 rounded-full border-2 border-dashed border-sun-400/40" aria-hidden />
+        <IconLogo size={60} className="anim-pop" />
+        <p className="anim-blink text-[10.5px] font-extrabold tracking-[0.22em] text-white/60 uppercase">Membuka ruang kendali…</p>
+      </div>
+    </div>
+  );
+}
+
+/* Hard gate: Master Data is Super Admin territory only. */
+function LockedScreen({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="app-bg grid min-h-dvh place-items-center px-6">
+      <div className="anim-pop w-full max-w-sm rounded-[28px] border border-ink-100 bg-white p-8 text-center shadow-[0_30px_80px_rgba(23,42,89,0.18)]">
+        <span className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-ink-100 text-ink-500">
+          <IconLock size={34} />
+        </span>
+        <h1 className="mt-5 font-display text-[24px] leading-tight font-extrabold text-ink-900">Area Terbatas</h1>
+        <p className="mt-2 text-[13px] leading-relaxed font-semibold text-ink-400">
+          Master Data hanya dapat diakses oleh <b className="text-ink-700">Super Admin</b>.
+          Jika Anda membutuhkannya, hubungi Super Admin perusahaan Anda.
+        </p>
+        <button className="btn-ghost mt-5 w-full !py-3 text-[13px]" onClick={onBack}>
+          <IconArrowRight size={14} className="rotate-180" /> Kembali
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* Global safety net — surfaces async/runtime failures as a toast instead of silence. */
+function ErrorNet() {
+  const toast = useToast();
+  const lastRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const gate = (kind: string): boolean => {
+      const now = Date.now();
+      if (now - (lastRef.current[kind] ?? 0) < 6000) return false;
+      lastRef.current[kind] = now;
+      return true;
+    };
+    const onErr = () => { if (gate("err")) toast.push("danger", "Terjadi kesalahan teknis", "Aksi terakhir mungkin belum tersimpan — silakan coba lagi."); };
+    const onRej = () => { if (gate("rej")) toast.push("warn", "Proses tertunda", "Mesin wajah atau jaringan lambat — coba ulangi sebentar lagi."); };
+    const onFull = () => { if (gate("full")) toast.push("danger", "Penyimpanan perangkat penuh", "Data baru mungkin tidak tersimpan. Hapus foto/lampiran lama agar lega."); };
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onRej);
+    window.addEventListener("vittoria:storage-full", onFull as EventListener);
+    return () => {
+      window.removeEventListener("error", onErr);
+      window.removeEventListener("unhandledrejection", onRej);
+      window.removeEventListener("vittoria:storage-full", onFull as EventListener);
+    };
+  }, [toast]);
+  return null;
 }
 
 function TabBtn({ t, active, onClick, badge }: { t: TabDef; active: boolean; onClick: () => void; badge?: string | null }) {
@@ -592,7 +689,7 @@ function FeatureSheet({
             </p>
           </div>
           <span className="hidden text-right text-[9.5px] leading-tight font-bold text-ink-300 sm:block">
-            {company.appName}<br />v6.2 · WIB
+            {company.appName}<br />{APP_VERSION} · WIB
           </span>
         </div>
 
@@ -656,6 +753,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <ToastProvider>
+        <ErrorNet />
         <AppProvider>
           <Shell />
         </AppProvider>
