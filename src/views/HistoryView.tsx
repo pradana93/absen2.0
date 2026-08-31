@@ -96,13 +96,14 @@ export default function HistoryView() {
             {employees.map((e) => <option key={e.staffId} value={e.staffId}>{e.name} · {e.staffId}</option>)}
           </select>
         )}
-        <div className="flex gap-2.5">
-          <input type="month" className="input !py-2.5 text-sm" value={month} max={today.slice(0, 7)} onChange={(e) => setMonth(e.target.value)} />
-          <select className="input !py-2.5 text-sm" value={type} onChange={(e) => setType(e.target.value)}>
-            {["Semua", "IN", "OUT"].map((t) => <option key={t}>{t}</option>)}
+        {/* month takes its own row on narrow phones; type+status share one */}
+        <div className="grid grid-cols-2 gap-2.5 min-[420px]:grid-cols-3">
+          <input type="month" className="input col-span-2 !py-2.5 min-[420px]:col-span-1" value={month} max={today.slice(0, 7)} onChange={(e) => setMonth(e.target.value)} />
+          <select className="input !py-2.5" value={type} onChange={(e) => setType(e.target.value)} aria-label="Filter tipe">
+            {["Semua", "IN", "OUT"].map((t) => <option key={t}>{t === "Semua" ? "Semua Tipe" : t === "IN" ? "Check-IN" : "Check-OUT"}</option>)}
           </select>
-          <select className="input !py-2.5 text-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
-            {["Semua", "VERIFIED", "REJECTED"].map((t) => <option key={t}>{t}</option>)}
+          <select className="input !py-2.5" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter status">
+            {["Semua", "VERIFIED", "REJECTED"].map((t) => <option key={t}>{t === "Semua" ? "Semua Status" : t === "VERIFIED" ? "Terverifikasi" : "Ditolak"}</option>)}
           </select>
         </div>
       </div>

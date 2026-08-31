@@ -42,7 +42,11 @@ body {
   color: var(--color-ink-900);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  /* kills the 300ms tap delay & accidental double-tap zoom on mobile */
+  touch-action: manipulation;
+  overscroll-behavior-y: none;
 }
+button, a, [role="button"] { touch-action: manipulation; }
 
 .app-bg {
   background:
@@ -55,9 +59,15 @@ body {
 .card { @apply rounded-2xl border border-ink-100 bg-white shadow-[0_10px_30px_rgba(23,42,89,0.06)]; }
 .card-press { @apply transition-transform duration-150 active:scale-[0.98]; }
 
+/* font-size ≥16px: prevents iOS Safari's auto-zoom on focus */
 .input {
-  @apply w-full rounded-xl border border-ink-200 bg-white px-3.5 py-3 text-[15px] font-semibold text-ink-900 outline-none transition
+  @apply w-full rounded-xl border border-ink-200 bg-white px-3.5 py-3 text-[16px] font-semibold text-ink-900 outline-none transition
     placeholder:font-medium placeholder:text-ink-300 focus:border-sun-400 focus:ring-4 focus:ring-sun-400/15;
+}
+/* enforce it even where a utility class shrinks the text (coarse pointers only — desktop unaffected) */
+@media (pointer: coarse) {
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+  select, textarea { font-size: 16px !important; }
 }
 .label { @apply mb-1.5 block text-[11px] font-extrabold tracking-[0.12em] text-ink-400 uppercase; }
 

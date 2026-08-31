@@ -1,14 +1,25 @@
-/* Vittoria HR service worker — network-first shell, cache-first assets. */
+/* Vittoria HR service worker — network-first shell, cache-first assets.
+   Scope-relative: works on the domain root AND GitHub Pages subpaths. */
 const CACHE = "vittoria-hr-v7";
+/* base = the directory this sw.js lives in (e.g. "/" or "/repo-name/") */
+const BASE = self.location.pathname.replace(/[^/]*$/, "");
+
+const precache = () =>
+  caches.open(CACHE).then((c) =>
+    c.addAll([BASE, BASE + "manifest.webmanifest", BASE + "icon.svg"]).catch(() => undefined),
+  );
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/manifest.webmanifest", "/icon.svg"]).catch(() => undefined)));
+  e.waitUntil(precache());
 });
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim()),
   );
 });
 
@@ -16,17 +27,19 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // CDN weights/tiles fetch normally
+  if (url.origin !== self.location.origin) return; // CDN weights/tiles/fonts fetch normally
+  /* only handle requests under our base path */
+  if (!url.pathname.startsWith(BASE)) return;
 
   if (req.mode === "navigate") {
     e.respondWith(
       fetch(req)
         .then((res) => {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put("/", copy)).catch(() => undefined);
+          caches.open(CACHE).then((c) => c.put(BASE, copy)).catch(() => undefined);
           return res;
         })
-        .catch(() => caches.match("/").then((m) => m || Response.error())),
+        .catch(() => caches.match(BASE).then((m) => m || Response.error())),
     );
     return;
   }
