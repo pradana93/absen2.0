@@ -41,6 +41,37 @@ export const SEED_SALARY: Record<Role, SalaryStructure> = {
   employee: { basic: 5_200_000, transport: 20_000, meal: 15_000, otPerHour: 30_000 },
 };
 
+/* ------------------------- sites (Gudang / Area) ------------------------ */
+export type SiteColor = "sun" | "sky" | "teal" | "grape" | "coral";
+
+export interface Site {
+  id: string;
+  name: string;        // "Gudang Pusat Jakarta"
+  shortName: string;   // "Jakarta"
+  address: string;
+  hqLat: number;       // geofence_locations — each site owns its fence
+  hqLon: number;
+  radiusM: number;
+  color: SiteColor;
+}
+
+/** Literal class map so Tailwind JIT keeps them. */
+export const SITE_STYLE: Record<SiteColor, { chip: string; dot: string; ring: string; grad: string }> = {
+  sun:   { chip: "bg-sun-100 text-sun-700",     dot: "bg-sun-500",   ring: "ring-sun-400",   grad: "from-sun-400 to-sun-600" },
+  sky:   { chip: "bg-sky-100 text-sky-600",     dot: "bg-sky-500",   ring: "ring-sky-400",   grad: "from-sky-300 to-sky-600" },
+  teal:  { chip: "bg-teal-100 text-teal-600",   dot: "bg-teal-500",  ring: "ring-teal-400",  grad: "from-teal-300 to-teal-600" },
+  grape: { chip: "bg-grape-100 text-grape-600", dot: "bg-grape-500", ring: "ring-grape-400", grad: "from-grape-300 to-grape-600" },
+  coral: { chip: "bg-coral-100 text-coral-600", dot: "bg-coral-500", ring: "ring-coral-400", grad: "from-coral-300 to-coral-600" },
+};
+
+export function seedSites(): Site[] {
+  return [
+    { id: "site-jkt", name: "Gudang Pusat Jakarta", shortName: "Jakarta", address: "Jl. Gatot Subroto Kav. 21, Jakarta Pusat", hqLat: -6.1754, hqLon: 106.8272, radiusM: 100, color: "sun" },
+    { id: "site-bdg", name: "Gudang Bandung", shortName: "Bandung", address: "Jl. Soekarno-Hatta No. 789, Bandung", hqLat: -6.9147, hqLon: 107.6098, radiusM: 120, color: "sky" },
+    { id: "site-sby", name: "Gudang Surabaya", shortName: "Surabaya", address: "Jl. Margomulyo No. 45, Surabaya", hqLat: -7.2575, hqLon: 112.7521, radiusM: 150, color: "teal" },
+  ];
+}
+
 export interface Employee {
   staffId: string;
   nik: string;
@@ -57,6 +88,7 @@ export interface Employee {
   shiftId: string;
   status: EmpStatus;
   salary: SalaryStructure;
+  siteId: string | null; // null = Kantor Pusat / semua area (Super Admin & HR)
   photo: string | null;
   descriptor: number[] | null; // 128-D face encoding
   hash: string | null;         // lite-mode dHash
@@ -71,6 +103,7 @@ export interface AttendanceLog {
   staffId: string;
   name: string;
   department: string;
+  siteId: string; // the Gudang/Area where the clock happened
   type: AttendanceType;
   lat: number;
   lon: number;
@@ -198,10 +231,7 @@ export interface Company {
   id: string;
   name: string;
   shortName: string;
-  address: string;
-  hqLat: number;
-  hqLon: number;
-  radiusM: number;
+  address: string; // kantor pusat (branding only — geofences live on each Site)
   deviceBinding: boolean;
   holidays: Holiday[];
   appName: string;
