@@ -1,0 +1,66 @@
+# Vittoria HR — deploy straight from GitHub to GitHub Pages.
+#
+# How it works:
+#   Every push to main (or master) builds the app and publishes it to
+#   https://<your-username>.github.io/<this-repo>/
+#   You can also trigger it manually from the Actions tab.
+#
+# One-time setup in the GitHub UI (Settings → Pages):
+#   Build and deployment → Source: "GitHub Actions"
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment at a time; a newer push cancels the older run.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # --base=./ emits relative asset paths so the site works both at
+      # https://<user>.github.io/<repo>/ and on any custom domain.
+      - name: Build
+        run: npm run build -- --base=./
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

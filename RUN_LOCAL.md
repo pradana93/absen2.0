@@ -76,32 +76,13 @@ cd USERNAME.github.io && git add -A && git commit -m "deploy" && git push
 # → https://USERNAME.github.io
 ```
 
-**Opsi B — GitHub Actions (auto-deploy ke repo mana pun):**
-Buat `.github/workflows/deploy.yml`:
-```yaml
-name: Deploy
-on:
-  push: { branches: [main] }
-permissions: { contents: read, pages: write, id-token: write }
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - run: npm ci && npm run build -- --base=./
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: dist }
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: { name: github-pages, url: ${{ steps.deployment.outputs.page_url }} }
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
-```
-Aktifkan di **Settings → Pages → Source: GitHub Actions** → setiap push auto-deploy.
+**Opsi B — GitHub Actions (sudah termasuk di repo ini):**
+Workflow siap pakai sudah ter-commit di `.github/workflows/deploy-pages.yml` — tidak perlu membuat apa pun. Cukup:
+
+1. Aktifkan sekali di GitHub UI: **Settings → Pages → Build and deployment → Source: "GitHub Actions"**
+2. Push ke `main` → tab **Actions** memperlihatkan build berjalan → selesai
+
+URL live: `https://USERNAME.github.io/NAMA-REPO/` — dan setiap push berikutnya otomatis deploy ulang.
 
 ---
 
