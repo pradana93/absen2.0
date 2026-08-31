@@ -46,16 +46,75 @@ App ini hasil build-nya **static files** (HTML/JS/CSS), jadi bisa di-host gratis
 | URL gratis | `nama-app.netlify.app` | `nama-app.pages.dev` | `nama-app.vercel.app` |
 | Custom domain gratis | ✅ | ✅ | ✅ |
 
-**Langkah (Netlify, paling sederhana):**
-1. Buka https://app.netlify.com → **Add new site → Import an existing project**
-2. Pilih repo GitHub Anda
-3. Build settings (biasanya terdeteksi otomatis):
-   - Build command: `npm run build`
-   - Publish directory: `dist`
-4. Klik **Deploy** → dapat URL `https://nama-acak.netlify.app` (bisa diganti)
-5. Selesai — setiap `git push` ke `main` otomatis deploy ulang
+## 📘 Full Tutorial: Deploy to Netlify from GitHub
 
-Cloudflare Pages & Vercel: alurnya identik (import repo → framework preset "Vite" → deploy).
+> The repo already ships `netlify.toml`, `public/_redirects`, and `.nvmrc` —
+> Netlify auto-detects the build command, publish directory, SPA routing, and
+> Node version from these files. **You should not have to type any settings.**
+
+### Phase 0 — Prerequisites
+
+- A GitHub account with your repository pushed to it
+- A Netlify account (free): sign up at https://app.netlify.com/signup (use "Sign up with GitHub")
+
+### Phase 1 — Put the code on GitHub (skip if done)
+
+```bash
+git init
+git add -A
+git commit -m "Vittoria HR app"
+git branch -M main
+git remote add origin https://github.com/USERNAME/vittoria-hr.git
+git push -u origin main
+```
+
+### Phase 2 — Connect Netlify to the repo
+
+1. Open https://app.netlify.com → **Add new site** → **Import an existing project**
+2. Choose **GitHub** → authorize if asked → pick your repository
+3. On the "Deploy settings" screen you should see (auto-read from `netlify.toml`):
+   - **Build command:** `npm run build`
+   - **Publish directory:** `dist`
+   - If the fields are empty, type exactly those two values. **Never** set the publish directory to `/`, `build`, or `public` — that serves the source files and produces a blank page.
+4. Click **Deploy vittoria-hr**
+5. Wait ~1–2 minutes. The log must end with `✓ built in ...s` (Vite's success line). If it does, your site is live at `https://<random-name>.netlify.app`
+
+### Phase 3 — Verify it actually works
+
+Open your new URL and check, in order:
+
+- [ ] The login screen renders (logo, WIB clock, Gudang picker) — **not a blank page**
+- [ ] Open DevTools (F12) → Console: no red errors; Network tab: `main.tsx` must **not** appear as a 404 (if it does, Phase 2 step 3 was wrong)
+- [ ] Log in as Super Admin (`wh.leader.vt@gmail.com` / `super123`)
+- [ ] Open the Absen tab and allow camera + location — both require the HTTPS that Netlify provides automatically
+
+### Phase 4 — Bring your company data along
+
+The Netlify URL is a **new origin**, so its `localStorage` starts empty (the app re-seeds demo data). To carry your real setup over:
+
+1. In the old environment (sandbox/preview): log in as Super Admin → **Master Data** → **Ekspor Semua (JSON)**
+2. On the Netlify URL: Super Admin → **Master Data → Impor** → pick the JSON file → apply
+3. Your tenants, gudangs, employees, shifts, quotas, and salary defaults arrive intact. (Attendance history can be exported/imported as CSV for the records.)
+
+### Phase 5 — Make it yours (optional)
+
+- **Rename the site:** Site configuration → **Change site name** → e.g. `vittoria-hr.netlify.app`
+- **Custom domain:** Domain management → **Add a domain** → follow the DNS steps; HTTPS renews automatically
+- **Every future deploy is automatic:** `git push` → Netlify rebuilds → live in ~90 s. Watch it in the **Deploys** tab.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| **Blank white page** | Publish directory wrong → source `index.html` served, `/src/main.tsx` 404s | Set publish dir to `dist` (Site configuration → Build & deploy), redeploy |
+| Blank page, console shows a JS error | Stale browser cache/SW after a redeploy | Hard refresh (Ctrl/Cmd+Shift+R); unregister the service worker in DevTools → Application |
+| 404 / blank on refresh | SPA redirect missing | Already fixed by `netlify.toml` + `public/_redirects` in this repo — redeploy |
+| Build fails: `vite: not found` or engine errors | Node version too old | Already pinned to Node 20 via `netlify.toml` + `.nvmrc` — redeploy |
+| Camera says "not allowed" | Browser permission or non-HTTPS context | Grant camera permission for the site; confirm the URL starts with `https://` |
+| GPS stuck on "mencari…" | Location permission denied, or desktop without GPS | Allow location; or enable **Simulasi GPS** in Sistem for demos |
+| Deploy log fails at `npm install` | Lockfile conflict | In Netlify: Site configuration → Build → clear cache and redeploy |
+
+Cloudflare Pages & Vercel: alurnya identik (import repo → framework preset "Vite" → deploy; `netlify.toml` diabaikan — set build `npm run build`, output `dist` di UI mereka).
 
 ### 🥈 GitHub Pages (jika ingin tetap 100% di GitHub)
 
