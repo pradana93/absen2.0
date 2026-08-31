@@ -9,7 +9,7 @@ import { uid, wibDayKey } from "./format";
 export const DEFAULT_HQ = { lat: -6.1754, lon: 106.8272 }; // Gudang Pusat
 export const EMAIL_DOMAIN = "vittoria.co.id";
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-export const DEPARTMENTS = ["Gudang", "Logistik", "Operasional", "QC", "Keuangan", "HR", "Direksi"];
+export const DEPARTMENTS = ["Gudang"];
 
 export type Role = "superadmin" | "companyadmin" | "manager" | "employee";
 export const ROLE_LABEL: Record<Role, string> = {
@@ -66,9 +66,8 @@ export const SITE_STYLE: Record<SiteColor, { chip: string; dot: string; ring: st
 
 export function seedSites(): Site[] {
   return [
-    { id: "site-jkt", name: "Gudang Pusat Jakarta", shortName: "Jakarta", address: "Jl. Gatot Subroto Kav. 21, Jakarta Pusat", hqLat: -6.1754, hqLon: 106.8272, radiusM: 100, color: "sun" },
-    { id: "site-bdg", name: "Gudang Bandung", shortName: "Bandung", address: "Jl. Soekarno-Hatta No. 789, Bandung", hqLat: -6.9147, hqLon: 107.6098, radiusM: 120, color: "sky" },
-    { id: "site-sby", name: "Gudang Surabaya", shortName: "Surabaya", address: "Jl. Margomulyo No. 45, Surabaya", hqLat: -7.2575, hqLon: 112.7521, radiusM: 150, color: "teal" },
+    { id: "site-vit", name: "Gudang Vittoria", shortName: "Vittoria", address: "Jl. Gatot Subroto Kav. 21, Jakarta Pusat", hqLat: -6.1754, hqLon: 106.8272, radiusM: 100, color: "sun" },
+    { id: "site-bc", name: "Gudang Batu Ceper", shortName: "Batu Ceper", address: "Jl. Pembangunan III, Batu Ceper, Tangerang", hqLat: -6.1668, hqLon: 106.6315, radiusM: 120, color: "sky" },
   ];
 }
 
@@ -292,7 +291,7 @@ function save(key: string, value: unknown) {
 }
 
 export function clearAll() {
-  ["employees", "logs", "settings", "seeded", "company", "shifts", "leaves", "breaks", "audit", "notifs", "session", "payslips", "org"].forEach((k) =>
+  ["employees", "logs", "settings", "seeded", "company", "shifts", "leaves", "breaks", "audit", "notifs", "session", "payslips", "org", "sites", "sitechoice"].forEach((k) =>
     localStorage.removeItem(NS + k),
   );
 }
@@ -301,7 +300,7 @@ export function clearAll() {
  * Schema versioning — when the data model changes between releases we wipe
  * and reseed, so stale local data can never break login or rendering.
  */
-export const DATA_VERSION = "6";
+export const DATA_VERSION = "7";
 export function ensureFreshVersion() {
   try {
     if (localStorage.getItem(NS + "dataversion") !== DATA_VERSION) {
@@ -338,6 +337,7 @@ function migrateEmployee(e: Partial<Employee> & Record<string, unknown>): Employ
     shiftId: SHIFT_MIGRATION[String(e.shiftId ?? e.shift ?? "")] ?? String(e.shiftId ?? "sh-pagi"),
     status: STATUS_MIGRATION[String(e.status ?? "")] ?? (e.status as EmpStatus) ?? "active",
     salary: (e.salary as SalaryStructure) ?? SEED_SALARY[role],
+    siteId: (e.siteId as string | null) ?? (role === "superadmin" || role === "companyadmin" ? null : "site-vit"),
     photo: (e.photo as string | null) ?? null,
     descriptor: (e.descriptor as number[] | null) ?? null,
     hash: (e.hash as string | null) ?? null,
@@ -372,9 +372,14 @@ export const db = {
   saveSession: (v: unknown) => save("session", v),
   loadPayslips: () => load<Payslip[]>("payslips", []),
   savePayslips: (v: Payslip[]) => save("payslips", v),
-  loadOrg: () => load<OrgNode[]>("org", []),
+  loadOrg: () => load<OrgNode[]>("org", []).map((n) => ({ ...n, siteId: n.siteId ?? "site-vit" })),
   saveOrg: (v: OrgNode[]) => save("org", v),
+  loadSites: () => load<Site[]>("sites", []),
+  saveSites: (v: Site[]) => save("sites", v),
+  loadSiteChoice: () => load<string | null>("sitechoice", null),
+  saveSiteChoice: (v: string | null) => save("sitechoice", v),
 };
+export const KEY_SITES = NS + "sites";
 
 /* ------------------------------- helpers --------------------------------- */
 export function genPassword(): string {
@@ -408,9 +413,6 @@ export function seedCompany(): Company {
     name: "PT Vittoria Logistik Indonesia",
     shortName: "Vittoria",
     address: "Jl. Gatot Subroto Kav. 21, Jakarta Pusat",
-    hqLat: DEFAULT_HQ.lat,
-    hqLon: DEFAULT_HQ.lon,
-    radiusM: 100,
     deviceBinding: true,
     holidays: [...SEED_HOLIDAYS],
     appName: "Vittoria HR",
@@ -432,8 +434,9 @@ export function seedShifts(): Shift[] {
 }
 
 function mkEmp(
-  staffId: string, name: string, department: string, position: string,
+  staffId: string, name: string, position: string,
   role: Role, shiftId: string, email: string, password: string,
+  siteId: string | null,
 ): Employee {
   return {
     staffId,
@@ -443,9 +446,10 @@ function mkEmp(
     address: "Jakarta",
     emergencyName: "Keluarga",
     emergencyPhone: "+62 811-0000-0000",
-    department, position, role, shiftId,
+    department: "Gudang", position, role, shiftId,
     status: "active",
     salary: { ...SEED_SALARY[role] },
+    siteId,
     photo: null, descriptor: null, hash: null,
     deviceId: null, deviceBoundAt: null,
     createdAt: Date.now() - 60 * 86400_000,
@@ -454,14 +458,14 @@ function mkEmp(
 
 export function seedEmployees(): Employee[] {
   return [
-    mkEmp("SU-001", "Wahyu Handoko", "Direksi", "Super Admin", "superadmin", "sh-fleks", "wh.leader.vt@gmail.com", "super123"),
-    mkEmp("HR-001", "Maya Kirana", "HR", "HR Manager", "companyadmin", "sh-fleks", `hr@${EMAIL_DOMAIN}`, "admin123"),
-    mkEmp("MGR-001", "Budi Hartono", "Operasional", "Manajer Operasional", "manager", "sh-pagi", `budi.hartono@${EMAIL_DOMAIN}`, "123456"),
-    mkEmp("VTR-001", "Andi Saputra", "Gudang", "Operator Forklift", "employee", "sh-pagi", `andi.saputra@${EMAIL_DOMAIN}`, "123456"),
-    mkEmp("VTR-002", "Rina Marlina", "Gudang", "Admin Gudang", "employee", "sh-pagi", `rina.marlina@${EMAIL_DOMAIN}`, "123456"),
-    mkEmp("VTR-003", "Joko Prasetyo", "Logistik", "Driver", "employee", "sh-siang", `joko.prasetyo@${EMAIL_DOMAIN}`, "123456"),
-    mkEmp("VTR-004", "Sari Wulandari", "QC", "Inspector", "employee", "sh-pagi", `sari.wulandari@${EMAIL_DOMAIN}`, "123456"),
-    mkEmp("VTR-005", "Dedi Kurniawan", "Gudang", "Picker", "employee", "sh-malam", `dedi.kurniawan@${EMAIL_DOMAIN}`, "123456"),
+    mkEmp("SU-001", "Wahyu Handoko", "Super Admin", "superadmin", "sh-fleks", "wh.leader.vt@gmail.com", "super123", null),
+    mkEmp("HR-001", "Maya Kirana", "HR Manager", "companyadmin", "sh-fleks", `hr@${EMAIL_DOMAIN}`, "admin123", null),
+    mkEmp("MGR-001", "Budi Hartono", "Manajer Operasional", "manager", "sh-pagi", `budi.hartono@${EMAIL_DOMAIN}`, "123456", "site-vit"),
+    mkEmp("VTR-001", "Andi Saputra", "Operator Forklift", "employee", "sh-pagi", `andi.saputra@${EMAIL_DOMAIN}`, "123456", "site-vit"),
+    mkEmp("VTR-002", "Rina Marlina", "Admin Gudang", "employee", "sh-pagi", `rina.marlina@${EMAIL_DOMAIN}`, "123456", "site-vit"),
+    mkEmp("VTR-003", "Joko Prasetyo", "Driver", "employee", "sh-siang", `joko.prasetyo@${EMAIL_DOMAIN}`, "123456", "site-bc"),
+    mkEmp("VTR-004", "Sari Wulandari", "Inspector", "employee", "sh-pagi", `sari.wulandari@${EMAIL_DOMAIN}`, "123456", "site-bc"),
+    mkEmp("VTR-005", "Dedi Kurniawan", "Picker", "employee", "sh-malam", `dedi.kurniawan@${EMAIL_DOMAIN}`, "123456", "site-vit"),
   ];
 }
 
@@ -474,33 +478,38 @@ function tsAt(day: string, hm: string): number {
   return new Date(`${day}T${hm}:00+07:00`).getTime();
 }
 
-export function seedLogs(hq: { lat: number; lon: number }, radiusM: number): AttendanceLog[] {
+export function seedLogs(sites: Site[]): AttendanceLog[] {
   const logs: AttendanceLog[] = [];
-  const staff = [
-    { id: "MGR-001", name: "Budi Hartono", dept: "Operasional" },
-    { id: "VTR-001", name: "Andi Saputra", dept: "Gudang" },
-    { id: "VTR-002", name: "Rina Marlina", dept: "Gudang" },
-    { id: "VTR-003", name: "Joko Prasetyo", dept: "Logistik" },
-    { id: "VTR-004", name: "Sari Wulandari", dept: "QC" },
-    { id: "VTR-005", name: "Dedi Kurniawan", dept: "Gudang" },
+  const roster: Array<{ id: string; name: string; site: string }> = [
+    { id: "MGR-001", name: "Budi Hartono", site: "site-vit" },
+    { id: "VTR-001", name: "Andi Saputra", site: "site-vit" },
+    { id: "VTR-002", name: "Rina Marlina", site: "site-vit" },
+    { id: "VTR-003", name: "Joko Prasetyo", site: "site-bc" },
+    { id: "VTR-004", name: "Sari Wulandari", site: "site-bc" },
+    { id: "VTR-005", name: "Dedi Kurniawan", site: "site-vit" },
   ];
+  const siteById = new Map(sites.map((s) => [s.id, s]));
   for (let d = 6; d >= 0; d--) {
     const day = dayKeyOffset(d);
-    staff.forEach((s, si) => {
+    roster.forEach((s, si) => {
+      const st = siteById.get(s.site);
+      if (!st) return;
       const dist = 18 + ((si * 13 + d * 7) % 70);
       const late = (si + d) % 5 === 0;
       const inHm = late ? `08:${String(22 + ((si * 3) % 20)).padStart(2, "0")}` : `07:${String(45 + ((si * 4) % 14)).padStart(2, "0")}`;
       const outHm = `16:${String(5 + ((si * 6) % 30)).padStart(2, "0")}`;
       logs.push({
-        id: uid("log"), ts: tsAt(day, inHm), staffId: s.id, name: s.name, department: s.dept,
-        type: "IN", lat: hq.lat + (si % 3) * 0.00012, lon: hq.lon + (si % 2) * 0.0001,
+        id: uid("log"), ts: tsAt(day, inHm), staffId: s.id, name: s.name, department: "Gudang",
+        siteId: st.id,
+        type: "IN", lat: st.hqLat + (si % 3) * 0.00012, lon: st.hqLon + (si % 2) * 0.0001,
         distanceM: dist, faceDist: Math.round((0.28 + (si % 4) * 0.04) * 1000) / 1000,
         method: "face", source: "gps", status: "VERIFIED", reason: null,
         lateMin: late ? 10 + ((si * 5) % 25) : undefined,
       });
       logs.push({
-        id: uid("log"), ts: tsAt(day, outHm), staffId: s.id, name: s.name, department: s.dept,
-        type: "OUT", lat: hq.lat + (si % 3) * 0.00012, lon: hq.lon + (si % 2) * 0.0001,
+        id: uid("log"), ts: tsAt(day, outHm), staffId: s.id, name: s.name, department: "Gudang",
+        siteId: st.id,
+        type: "OUT", lat: st.hqLat + (si % 3) * 0.00012, lon: st.hqLon + (si % 2) * 0.0001,
         distanceM: dist + 4, faceDist: Math.round((0.3 + (si % 4) * 0.035) * 1000) / 1000,
         method: "face", source: "gps", status: "VERIFIED", reason: null,
         workMin: 450 + ((si * 17) % 60),
@@ -509,13 +518,17 @@ export function seedLogs(hq: { lat: number; lon: number }, radiusM: number): Att
     });
     // one rejected geofence attempt for the anomaly widget
     if (d % 2 === 0) {
-      logs.push({
-        id: uid("log"), ts: tsAt(day, "08:41"), staffId: "VTR-005", name: "Dedi Kurniawan", department: "Gudang",
-        type: "IN", lat: hq.lat + 0.004, lon: hq.lon + 0.003,
-        distanceM: radiusM + 320, faceDist: 0.31,
-        method: "face", source: "gps", status: "REJECTED",
-        reason: `Di luar radius (${radiusM + 320} m)`,
-      });
+      const st = siteById.get("site-vit");
+      if (st) {
+        logs.push({
+          id: uid("log"), ts: tsAt(day, "08:41"), staffId: "VTR-005", name: "Dedi Kurniawan", department: "Gudang",
+          siteId: st.id,
+          type: "IN", lat: st.hqLat + 0.004, lon: st.hqLon + 0.003,
+          distanceM: st.radiusM + 320, faceDist: 0.31,
+          method: "face", source: "gps", status: "REJECTED",
+          reason: `Di luar radius (${st.radiusM + 320} m)`,
+        });
+      }
     }
   }
   return logs.sort((a, b) => b.ts - a.ts);
@@ -573,6 +586,7 @@ export function seedNotifs(): Notif[] {
 export interface OrgNode {
   id: string;
   parentId: string | null;
+  siteId: string; // each Gudang owns its own structure
   title: string;
   staffId: string | null;
   name: string | null;
@@ -583,14 +597,15 @@ export interface OrgNode {
 export function seedOrgNodes(): OrgNode[] {
   const t = Date.now() - 30 * 86400_000;
   return [
-    { id: "org-root", parentId: null, title: "Direktur Utama", staffId: "SU-001", name: null, note: "Pimpinan perusahaan", createdAt: t },
-    { id: "org-ops", parentId: "org-root", title: "Manajer Operasional", staffId: "MGR-001", name: null, note: "Operasional gudang & armada", createdAt: t + 1 },
-    { id: "org-hr", parentId: "org-root", title: "HR Manager", staffId: "HR-001", name: null, note: "SDM & penggajian", createdAt: t + 2 },
-    { id: "org-fin", parentId: "org-root", title: "Manajer Keuangan", staffId: null, name: "Dewi Anggraini", note: null, createdAt: t + 3 },
-    { id: "org-adm", parentId: "org-ops", title: "Admin Gudang", staffId: "VTR-002", name: null, note: null, createdAt: t + 4 },
-    { id: "org-frk", parentId: "org-ops", title: "Operator Forklift", staffId: "VTR-001", name: null, note: "Shift pagi", createdAt: t + 5 },
-    { id: "org-log", parentId: "org-ops", title: "Driver Logistik", staffId: "VTR-003", name: null, note: null, createdAt: t + 6 },
-    { id: "org-qc", parentId: "org-ops", title: "QC Inspector", staffId: "VTR-004", name: null, note: null, createdAt: t + 7 },
+    /* Gudang Vittoria */
+    { id: "org-vit-root", parentId: null, siteId: "site-vit", title: "Manajer Operasional", staffId: "MGR-001", name: null, note: "Pimpinan gudang & armada", createdAt: t },
+    { id: "org-vit-adm", parentId: "org-vit-root", siteId: "site-vit", title: "Admin Gudang", staffId: "VTR-002", name: null, note: null, createdAt: t + 1 },
+    { id: "org-vit-frk", parentId: "org-vit-root", siteId: "site-vit", title: "Operator Forklift", staffId: "VTR-001", name: null, note: "Shift pagi", createdAt: t + 2 },
+    { id: "org-vit-pck", parentId: "org-vit-root", siteId: "site-vit", title: "Picker", staffId: "VTR-005", name: null, note: "Shift malam", createdAt: t + 3 },
+    /* Gudang Batu Ceper */
+    { id: "org-bc-root", parentId: null, siteId: "site-bc", title: "Kepala Gudang", staffId: null, name: "Hasan Basri", note: "Pimpinan gudang Batu Ceper", createdAt: t + 4 },
+    { id: "org-bc-drv", parentId: "org-bc-root", siteId: "site-bc", title: "Driver", staffId: "VTR-003", name: null, note: null, createdAt: t + 5 },
+    { id: "org-bc-qc", parentId: "org-bc-root", siteId: "site-bc", title: "Inspector", staffId: "VTR-004", name: null, note: null, createdAt: t + 6 },
   ];
 }
 

@@ -104,8 +104,9 @@ function AnomalyWidget() {
 }
 
 export default function DashboardView({ nav }: { nav: NavFn }) {
-  const { employees, logs, leaves, company, shifts, geo, decideLeave, audit } = useApp();
+  const { employees, logs, leaves, activeSite, shifts, geo, decideLeave, audit } = useApp();
   const toast = useToast();
+  const company = activeSite; // dashboard metrics follow the active Gudang/Area
   const [geoMode, setGeoMode] = useState<"map" | "radar">("map");
   const today = todayKey();
 

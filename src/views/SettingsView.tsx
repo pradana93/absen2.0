@@ -91,8 +91,8 @@ const MODULE_MAP: Array<[string, string, string]> = [
 
 export default function SettingsView() {
   const {
-    session, company, employees, logs, settings, engine, shifts, geo,
-    addShift, updateShift, removeShift, updateCompany, updateSettings, clearLogs, resetAll, audit,
+    session, company, employees, logs, settings, engine, shifts, geo, sites, activeSite,
+    addShift, updateShift, removeShift, updateCompany, updateSettings, updateSite, addSite, removeSite, switchSite, clearLogs, resetAll, audit,
   } = useApp();
   const toast = useToast();
   const isSuper = session?.role === "superadmin";
@@ -336,16 +336,16 @@ export default function SettingsView() {
         <SectionLabel
           right={
             <Chip tone={geoDraft ? "warn" : "ok"}>
-              <IconPin size={11} /> {geoDraft ? `${geoDraft.radiusM} m · draft` : `${company.radiusM} m · aktif`}
+              <IconPin size={11} /> {geoDraft ? `${geoDraft.radiusM} m · draft` : `${activeSite.radiusM} m · aktif`}
             </Chip>
           }
         >
-          Geofence Gudang
+          Geofence — {activeSite.name}
         </SectionLabel>
 
         <GeofenceMap
-          hq={{ lat: geoDraft?.lat ?? company.hqLat, lon: geoDraft?.lon ?? company.hqLon }}
-          radiusM={geoDraft?.radiusM ?? company.radiusM}
+          hq={{ lat: geoDraft?.lat ?? activeSite.hqLat, lon: geoDraft?.lon ?? activeSite.hqLon }}
+          radiusM={geoDraft?.radiusM ?? activeSite.radiusM}
           live={geo}
           editable
           fitPoints={false}
@@ -376,9 +376,9 @@ export default function SettingsView() {
               <button
                 className="btn-sun flex-[1.4] !py-2.5 !text-[13px]"
                 onClick={() => {
-                  updateCompany({ hqLat: geoDraft.lat, hqLon: geoDraft.lon, radiusM: geoDraft.radiusM });
-                  audit("GEOFENCE_UPDATE", company.id, `HQ → ${geoDraft.lat.toFixed(5)}, ${geoDraft.lon.toFixed(5)} · radius ${geoDraft.radiusM} m (via peta)`);
-                  toast.push("ok", "Geofence disimpan", `HQ baru & radius ${geoDraft.radiusM} m langsung berlaku.`);
+                  updateSite(activeSite.id, { hqLat: geoDraft.lat, hqLon: geoDraft.lon, radiusM: geoDraft.radiusM });
+                  audit("GEOFENCE_UPDATE", activeSite.id, `${activeSite.name}: HQ → ${geoDraft.lat.toFixed(5)}, ${geoDraft.lon.toFixed(5)} · radius ${geoDraft.radiusM} m (via peta)`);
+                  toast.push("ok", "Geofence disimpan", `${activeSite.name} · radius ${geoDraft.radiusM} m langsung berlaku.`);
                   setGeoDraft(null);
                 }}
               >
@@ -388,7 +388,7 @@ export default function SettingsView() {
           </div>
         ) : (
           <p className="rounded-xl bg-ink-50 px-3 py-2 text-[11.5px] leading-relaxed font-semibold text-ink-400">
-            <b className="text-ink-600">Geser pin oranye</b> untuk memilih area gudang, lalu <b className="text-ink-600">seret pegangan putih</b> di tepi
+            <b className="text-ink-600">Geser pin oranye</b> untuk memilih area {activeSite.shortName}, lalu <b className="text-ink-600">seret pegangan putih</b> di tepi
             lingkaran untuk menentukan radius secara manual. Berlaku setelah <b className="text-sun-700">Simpan</b> — tercatat di audit.
           </p>
         )}
@@ -399,17 +399,17 @@ export default function SettingsView() {
           </summary>
           <div className="space-y-3 pt-3">
             <div className="grid grid-cols-2 gap-3">
-              <NumberField label="Latitude HQ" value={company.hqLat} step={0.0001} onCommit={(v) => { setGeoDraft(null); updateCompany({ hqLat: v }); audit("GEOFENCE_UPDATE", company.id, `Lat → ${v}`); }} />
-              <NumberField label="Longitude HQ" value={company.hqLon} step={0.0001} onCommit={(v) => { setGeoDraft(null); updateCompany({ hqLon: v }); audit("GEOFENCE_UPDATE", company.id, `Lon → ${v}`); }} />
+              <NumberField label="Latitude HQ" value={activeSite.hqLat} step={0.0001} onCommit={(v) => { setGeoDraft(null); updateSite(activeSite.id, { hqLat: v }); audit("GEOFENCE_UPDATE", activeSite.id, `${activeSite.shortName}: Lat → ${v}`); }} />
+              <NumberField label="Longitude HQ" value={activeSite.hqLon} step={0.0001} onCommit={(v) => { setGeoDraft(null); updateSite(activeSite.id, { hqLon: v }); audit("GEOFENCE_UPDATE", activeSite.id, `${activeSite.shortName}: Lon → ${v}`); }} />
             </div>
             <div>
               <div className="flex items-center justify-between">
                 <label className="label !mb-0">Radius maksimum</label>
-                <span className="rounded-full bg-sun-100 px-2.5 py-0.5 font-display text-[14px] font-bold text-sun-700">{company.radiusM} m</span>
+                <span className="rounded-full bg-sun-100 px-2.5 py-0.5 font-display text-[14px] font-bold text-sun-700">{activeSite.radiusM} m</span>
               </div>
-              <input type="range" min={25} max={500} step={5} value={company.radiusM}
-                onChange={(e) => { setGeoDraft(null); updateCompany({ radiusM: Number(e.target.value) }); }}
-                onMouseUp={() => audit("GEOFENCE_UPDATE", company.id, `Radius → ${company.radiusM} m`)}
+              <input type="range" min={25} max={500} step={5} value={activeSite.radiusM}
+                onChange={(e) => { setGeoDraft(null); updateSite(activeSite.id, { radiusM: Number(e.target.value) }); }}
+                onMouseUp={() => audit("GEOFENCE_UPDATE", activeSite.id, `${activeSite.shortName}: Radius → ${activeSite.radiusM} m`)}
                 className="w-full cursor-pointer" />
               <div className="flex justify-between font-mono text-[10px] font-semibold text-ink-300"><span>25 m</span><span>500 m</span></div>
             </div>

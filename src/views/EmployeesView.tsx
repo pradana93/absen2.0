@@ -27,7 +27,7 @@ const STATUS_OPTIONS: EmpStatus[] = ["active", "inactive", "resigned"];
 type ShiftId = string;
 
 export default function EmployeesView() {
-  const { session, employees, logs, shifts, engine, addEmployee, updateEmployee, removeEmployee, unbindDevice, audit } = useApp();
+  const { session, employees, logs, shifts, sites, activeSite, engine, addEmployee, updateEmployee, removeEmployee, unbindDevice, audit } = useApp();
   const toast = useToast();
   const isSuper = session?.role === "superadmin";
 
@@ -76,6 +76,7 @@ export default function EmployeesView() {
   const [department, setDepartment] = useState(DEPARTMENTS[0]);
   const [role, setRole] = useState<Role>("employee");
   const [shift, setShift] = useState<ShiftId>("sh-pagi");
+  const [fSite, setFSite] = useState<string | null>(activeSite?.id ?? null);
   const [err, setErr] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [sig, setSig] = useState<FaceSignature | null>(null);
@@ -86,6 +87,7 @@ export default function EmployeesView() {
     setName(""); setStaffId(nextStaffId(employees));
     setEmail(""); setEmailTouched(false); setPassword(genPassword());
     setDepartment(DEPARTMENTS[0]); setRole("employee"); setShift("sh-pagi");
+    setFSite(activeSite?.id ?? null);
     setErr(""); setPhoto(null); setSig(null);
   };
 
@@ -123,6 +125,7 @@ export default function EmployeesView() {
       position: role === "employee" ? "Staff" : ROLE_LABEL[role],
       role,
       shiftId: shift,
+      siteId: role === "superadmin" || role === "companyadmin" ? null : fSite,
       status: "active",
       salary: {
         basic: role === "employee" ? 5_200_000 : role === "manager" ? 8_000_000 : 9_500_000,
@@ -151,7 +154,7 @@ export default function EmployeesView() {
       name: e.name, nik: e.nik, phone: e.phone, address: e.address,
       emergencyName: e.emergencyName, emergencyPhone: e.emergencyPhone,
       department: e.department, position: e.position, shiftId: e.shiftId,
-      status: e.status, role: e.role,
+      status: e.status, role: e.role, siteId: e.siteId,
       salary: { ...e.salary },
     });
   };
@@ -248,6 +251,13 @@ export default function EmployeesView() {
                       {shiftList.map((s) => <option key={s.id} value={s.id}>{s.name}{s.id !== "sh-fleks" ? ` (${s.start})` : ""}</option>)}
                     </select>
                   </div>
+                </div>
+                <div>
+                  <label className="label">Gudang / Area</label>
+                  <select className="input !py-3 text-sm" value={fSite ?? ""} onChange={(e) => setFSite(e.target.value || null)}>
+                    <option value="">Semua Area (Kantor Pusat)</option>
+                    {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="label">Kata Sandi Awal</label>
@@ -459,6 +469,13 @@ export default function EmployeesView() {
                 <label className="label">Shift</label>
                 <select className="input !py-2.5 text-sm" value={eForm.shiftId} onChange={(e) => setEForm({ ...eForm, shiftId: e.target.value })}>
                   {shiftList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Gudang / Area</label>
+                <select className="input !py-2.5 text-sm" value={eForm.siteId ?? ""} onChange={(e) => setEForm({ ...eForm, siteId: e.target.value || null })}>
+                  <option value="">Semua Area (Pusat)</option>
+                  {sites.map((s) => <option key={s.id} value={s.id}>{s.shortName}</option>)}
                 </select>
               </div>
               <div>
