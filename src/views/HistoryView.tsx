@@ -28,7 +28,9 @@ const cellStyle: Record<CellKind, string> = {
 const WEEKDAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
 
 export default function HistoryView() {
-  const { session, employees, logs, breaks, leaves, shifts, company, geo } = useApp();
+  const { session, employees, logs, breaks, leaves, shifts, company: co, activeSite, geo } = useApp();
+  // maps & radar follow the chosen Gudang/Area; holidays stay company-wide
+  const company = { ...activeSite, holidays: co.holidays };
   const me = session!;
   const isAdmin = me.role === "companyadmin" || me.role === "superadmin";
 

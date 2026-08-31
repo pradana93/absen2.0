@@ -1,31 +1,38 @@
 /**
- * Global app store — session (JWT), employees, logs, breaks, leaves,
- * payslips, shifts, org, company, settings, audit, notifications, live GPS,
- * face-engine tier — plus cross-tab tenant sync and identity import.
+ * Global app store — session (JWT), sites (Gudang/Area), employees, logs,
+ * breaks, leaves, payslips, shifts, company, settings, audit, notifications,
+ * live GPS, face-engine tier — plus cross-tab tenant sync and identity import.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  applyBrand, AttendanceLog, AuditLog, BreakRec, clearAll, Company, db, decodeIdentity, Employee, ensureFreshVersion,
-  KEY_COMPANY, LeaveRequest, Notif, OrgNode, Payslip, Role, seedAudit, seedCompany, seedEmployees,
-  seedLeaves, seedLogs, seedNotifs, seedOrgNodes, seedShifts, Settings, Shift, TenantIdentity,
+  applyBrand, AttendanceLog, AuditLog, BreakRec, clearAll, Company, db, Employee, ensureFreshVersion,
+  KEY_COMPANY, KEY_SITES, LeaveRequest, Notif, OrgNode, Payslip, Role, seedAudit, seedCompany,
+  seedEmployees, seedLeaves, seedLogs, seedNotifs, seedOrgNodes, seedShifts, seedSites, Settings, Shift,
+  Site, TenantIdentity,
 } from "./database";
+import { uid } from "./format";
 import { evaluateFence, FenceVerdict, GeoReading } from "./geoUtils";
 import { EngineStatus, initFaceEngine, onEngineStatus } from "./faceEngine";
 import { issueTokens, TokenPair } from "./jwt";
-import { uid, wibDayKey } from "./format";
 import { getDeviceId, shortDevice } from "./device";
 
 export interface LoginResult { ok: boolean; error?: string; }
 
 interface AppState {
   company: Company;
+  sites: Site[];
+  siteId: string;
+  activeSite: Site;
   employees: Employee[];
+  siteEmployees: Employee[];
   logs: AttendanceLog[];
+  siteLogs: AttendanceLog[];
   breaks: BreakRec[];
   leaves: LeaveRequest[];
   payslips: Payslip[];
   shifts: Shift[];
   org: OrgNode[];
+  siteOrg: OrgNode[];
   audits: AuditLog[];
   notifs: Notif[];
   settings: Settings;
@@ -34,8 +41,12 @@ interface AppState {
   fence: FenceVerdict | null;
   session: Employee | null;
   tokenExp: number;
-  login: (email: string, password: string) => Promise<LoginResult>;
+  login: (email: string, password: string, siteId: string) => Promise<LoginResult>;
   logout: () => void;
+  switchSite: (id: string) => void;
+  updateSite: (id: string, patch: Partial<Site>) => void;
+  addSite: (s: Site) => void;
+  removeSite: (id: string) => boolean;
   importIdentity: (id: TenantIdentity, source: string) => boolean;
   addEmployee: (e: Employee) => void;
   updateEmployee: (staffId: string, patch: Partial<Employee>) => void;
@@ -77,30 +88,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!db.wasSeeded()) {
       const c = seedCompany();
       db.saveCompany(c);
+      db.saveSites(seedSites());
       db.saveEmployees(seedEmployees());
       db.saveShifts(seedShifts());
-      db.saveLogs(seedLogs({ lat: c.hqLat, lon: c.hqLon }, c.radiusM));
+      db.saveLogs(seedLogs(db.loadSites()));
       db.saveLeaves(seedLeaves());
+      db.saveOrg(seedOrgNodes());
       db.saveAudit(seedAudit());
       db.saveNotifs(seedNotifs());
-      db.saveOrg(seedOrgNodes());
       db.markSeeded();
       return c;
     }
     return db.loadCompany();
+  });
+  const [sites, setSites] = useState<Site[]>(() => {
+    const s = db.loadSites();
+    return s.length ? s : seedSites();
+  });
+  const [siteId, setSiteId] = useState<string>(() => {
+    const sess = db.loadSession();
+    if (sess) {
+      const emp = db.loadEmployees().find((e) => e.staffId === sess.staffId);
+      if (emp?.siteId) return emp.siteId;
+    }
+    const choice = db.loadSiteChoice();
+    const s = db.loadSites();
+    if (choice && s.some((x) => x.id === choice)) return choice;
+    return s[0]?.id ?? "site-vit";
   });
   const [employees, setEmployees] = useState<Employee[]>(() => db.loadEmployees());
   const [logs, setLogs] = useState<AttendanceLog[]>(() => db.loadLogs());
   const [breaks, setBreaks] = useState<BreakRec[]>(() => db.loadBreaks());
   const [leaves, setLeaves] = useState<LeaveRequest[]>(() => db.loadLeaves());
   const [payslips, setPayslips] = useState<Payslip[]>(() => db.loadPayslips());
-  const [org, setOrg] = useState<OrgNode[]>(() => {
-    const o = db.loadOrg();
-    return o.length ? o : seedOrgNodes();
-  });
   const [shifts, setShifts] = useState<Shift[]>(() => {
     const s = db.loadShifts();
     return s.length ? s : seedShifts();
+  });
+  const [org, setOrg] = useState<OrgNode[]>(() => {
+    const o = db.loadOrg();
+    return o.length ? o : seedOrgNodes();
   });
   const [audits, setAudits] = useState<AuditLog[]>(() => db.loadAudit());
   const [notifs, setNotifs] = useState<Notif[]>(() => db.loadNotifs());
@@ -117,9 +144,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /* refs for callbacks */
   const employeesRef = useRef(employees); employeesRef.current = employees;
   const companyRef = useRef(company); companyRef.current = company;
+  const sitesRef = useRef(sites); sitesRef.current = sites;
   const sessionRef = useRef(session); sessionRef.current = session;
   const leavesRef = useRef(leaves); leavesRef.current = leaves;
   const payslipsRef = useRef(payslips); payslipsRef.current = payslips;
+  const orgRef = useRef(org); orgRef.current = org;
   const failRef = useRef<Record<string, number>>({});
   const settingsRef = useRef(settings); settingsRef.current = settings;
 
@@ -129,12 +158,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => db.saveBreaks(breaks), [breaks]);
   useEffect(() => db.saveLeaves(leaves), [leaves]);
   useEffect(() => db.savePayslips(payslips), [payslips]);
-  useEffect(() => db.saveOrg(org), [org]);
   useEffect(() => db.saveShifts(shifts), [shifts]);
+  useEffect(() => db.saveOrg(org), [org]);
   useEffect(() => db.saveAudit(audits), [audits]);
   useEffect(() => db.saveNotifs(notifs), [notifs]);
   useEffect(() => db.saveSettings(settings), [settings]);
   useEffect(() => db.saveCompany(company), [company]);
+  useEffect(() => db.saveSites(sites), [sites]);
 
   /* white-label: apply brand preset + sync browser title on tenant change */
   useEffect(() => {
@@ -146,6 +176,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === KEY_COMPANY) setCompany(db.loadCompany());
+      if (e.key === KEY_SITES) {
+        const s = db.loadSites();
+        if (s.length) setSites(s);
+      }
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -167,8 +201,57 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ]);
   }, []);
 
+  /* --------------------------------- sites -------------------------------- */
+  const activeSite = useMemo(
+    () => sites.find((s) => s.id === siteId) ?? sites[0],
+    [sites, siteId],
+  );
+
+  const switchSite = useCallback((id: string) => {
+    const s = sitesRef.current.find((x) => x.id === id);
+    if (!s) return;
+    setSiteId(id);
+    db.saveSiteChoice(id);
+    const actor = sessionRef.current ? employeesRef.current.find((e) => e.staffId === sessionRef.current?.staffId) : null;
+    setAudits((prev) => [{
+      id: uid("aud"), ts: Date.now(), actorId: actor?.staffId ?? "system", actorName: actor?.name ?? "Sistem",
+      role: (actor?.role ?? "system") as AuditLog["role"],
+      action: "SITE_SWITCH", target: id, detail: `Area aktif → ${s.name}`,
+    }, ...prev]);
+  }, []);
+
+  const updateSite = useCallback((id: string, patch: Partial<Site>) => {
+    setSites((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  }, []);
+
+  const addSite = useCallback((s: Site) => {
+    setSites((prev) => [...prev, s]);
+    // every Gudang starts with its own structure
+    setOrg((prev) => [...prev, {
+      id: uid("org"), parentId: null, siteId: s.id, title: "Kepala Gudang",
+      staffId: null, name: null, note: `Pimpinan ${s.name}`, createdAt: Date.now(),
+    }]);
+  }, []);
+
+  const removeSite = useCallback((id: string): boolean => {
+    const used = employeesRef.current.some((e) => e.siteId === id);
+    if (used) return false;
+    setSites((prev) => prev.filter((s) => s.id !== id));
+    setOrg((prev) => prev.filter((n) => n.siteId !== id));
+    setLogs((prev) => prev.filter((l) => l.siteId !== id));
+    setSiteId((cur) => {
+      if (cur === id) {
+        const next = sitesRef.current.find((s) => s.id !== id)?.id ?? "site-vit";
+        db.saveSiteChoice(next);
+        return next;
+      }
+      return cur;
+    });
+    return true;
+  }, []);
+
   /* -------------------------------- session ------------------------------- */
-  const login = useCallback(async (email: string, password: string): Promise<LoginResult> => {
+  const login = useCallback(async (email: string, password: string, chosenSite: string): Promise<LoginResult> => {
     await new Promise((r) => setTimeout(r, 450)); // perceptible auth round-trip
 
     const key = email.trim().toLowerCase();
@@ -195,9 +278,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     failRef.current[key] = 0;
     if (emp.status !== "active") return { ok: false, error: "Akun nonaktif — hubungi Admin HR." };
 
-    /* device binding: the account locks to the device of its FIRST login.
-       (Never pre-bind at creation — otherwise new staff can never log in
-       from their own phone.) */
+    /* site check — staff belong to one Gudang; HQ roles may enter any */
+    if (emp.siteId && emp.siteId !== chosenSite) {
+      const home = sitesRef.current.find((s) => s.id === emp.siteId);
+      return { ok: false, error: `Akun ini terdaftar di ${home?.name ?? "area lain"}. Pilih area yang sesuai.` };
+    }
+    const finalSite = emp.siteId ?? chosenSite;
+
+    /* device binding: the account locks to the device of its FIRST login. */
     const dev = getDeviceId();
     let boundNow = false;
     if (companyRef.current.deviceBinding) {
@@ -218,10 +306,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const sess = { staffId: emp.staffId, ...pair };
     setSession(sess);
     db.saveSession(sess);
+    setSiteId(finalSite);
+    db.saveSiteChoice(finalSite);
+    const siteName = sitesRef.current.find((s) => s.id === finalSite)?.name ?? finalSite;
     setAudits((prev) => [{
       id: uid("aud"), ts: Date.now(), actorId: emp.staffId, actorName: emp.name, role: emp.role,
       action: "AUTH_LOGIN", target: emp.staffId,
-      detail: `Login berhasil · JWT diterbitkan (8 jam)${boundNow ? ` · perangkat ${shortDevice(dev)} diikat` : ""}`,
+      detail: `Login berhasil · area ${siteName} · JWT diterbitkan (8 jam)${boundNow ? ` · perangkat ${shortDevice(dev)} diikat` : ""}`,
     }, ...prev]);
     return { ok: true };
   }, []);
@@ -247,7 +338,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const t = window.setTimeout(logout, left);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.accessExp]);
+  }, [session?.accessExp, logout]);
 
   /* --------------------------- identity import ---------------------------- */
   const importIdentity = useCallback((identity: TenantIdentity, source: string): boolean => {
@@ -257,7 +348,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const actor = s ? employeesRef.current.find((e) => e.staffId === s.staffId) : null;
     setAudits((prev) => [{
       id: uid("aud"), ts: Date.now(), actorId: actor?.staffId ?? "device", actorName: actor?.name ?? "Perangkat baru",
-      role: (actor?.role ?? "system") as AuditLog["role"], action: "IDENTITY_IMPORT", target: identity.name,
+      role: (actor?.role ?? "system") as AuditLog["role"], action: "IDENTITY_IMPORT", target: identity.appName,
       detail: `Identitas tenant "${identity.appName}" diterapkan via ${source}`,
     }, ...prev]);
     return true;
@@ -267,11 +358,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const m = window.location.hash.match(/^#tenant=(.+)$/);
     if (!m) return;
-    const id = decodeIdentity(decodeURIComponent(m[1]));
-    if (id) {
-      importIdentity(id, "tautan");
+    try {
+      const parsed = JSON.parse(decodeURIComponent(m[1])) as TenantIdentity;
+      importIdentity(parsed, "tautan");
       window.history.replaceState(null, "", window.location.pathname);
-    }
+    } catch { /* malformed link — ignore */ }
   }, [importIdentity]);
 
   /* ------------------------------ face engine ----------------------------- */
@@ -316,15 +407,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => navigator.geolocation.clearWatch(watchId);
   }, [settings.simEnabled, settings.simLat, settings.simLon]);
 
+  /* geofence now follows the ACTIVE SITE */
   const fence = useMemo(() => {
     if (!geo || (geo.status !== "locked" && geo.status !== "sim")) return null;
-    return evaluateFence(geo, { lat: company.hqLat, lon: company.hqLon }, company.radiusM);
-  }, [geo, company.hqLat, company.hqLon, company.radiusM]);
+    if (!activeSite) return null;
+    return evaluateFence(geo, { lat: activeSite.hqLat, lon: activeSite.hqLon }, activeSite.radiusM);
+  }, [geo, activeSite]);
 
   const sessionEmployee = useMemo(
     () => (session ? employees.find((e) => e.staffId === session.staffId) ?? null : null),
     [session, employees],
   );
+
+  /* ------------------------- site-scoped collections ----------------------- */
+  const siteEmployees = useMemo(() => employees.filter((e) => e.siteId === activeSite?.id), [employees, activeSite]);
+  const siteLogs = useMemo(() => logs.filter((l) => l.siteId === activeSite?.id), [logs, activeSite]);
+  const siteOrg = useMemo(() => org.filter((n) => n.siteId === activeSite?.id), [org, activeSite]);
 
   /* ------------------------------- employees ------------------------------ */
   const addEmployee = useCallback((e: Employee) => setEmployees((prev) => [e, ...prev]), []);
@@ -375,6 +473,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         : { ...l, status: "rejected" as const, hrDecision: decision };
     }));
 
+    const nextStatus = stage === "manager" ? (approve ? "pending_hr" : "rejected") : approve ? "approved" : "rejected";
     const verb = approve ? (stage === "manager" ? "disetujui Manajer → lanjut ke HR" : "disetujui HR (final)") : "ditolak";
     setNotifs((prev) => [{
       id: uid("ntf"), staffId: lv.staffId,
@@ -386,7 +485,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       id: uid("aud"), ts: Date.now(), actorId: actor?.staffId ?? "system", actorName: actor?.name ?? "Sistem",
       role: (actor?.role ?? "system") as AuditLog["role"],
       action: stage === "manager" ? (approve ? "LEAVE_APPROVE_MGR" : "LEAVE_REJECT_MGR") : approve ? "LEAVE_APPROVE_HR" : "LEAVE_REJECT_HR",
-      target: lv.staffId, detail: `${lv.type} ${lv.days} hari · ${lv.date}`,
+      target: lv.staffId, detail: `${lv.type} ${lv.days} hari · ${lv.date} → ${nextStatus}`,
     }, ...prev]);
   }, []);
 
@@ -425,6 +524,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     (id: string, patch: Partial<OrgNode>) => setOrg((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n))),
     [],
   );
+  /** Deleting a node promotes its direct children to the deleted node's parent. */
   const removeOrgNode = useCallback((id: string) => {
     setOrg((prev) => {
       const victim = prev.find((n) => n.id === id);
@@ -444,19 +544,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const removeShift = useCallback((id: string) => setShifts((prev) => prev.filter((s) => s.id !== id)), []);
 
   /* --------------------------------- breaks ------------------------------- */
-  const todayWib = () => wibDayKey(new Date());
-
   const activeBreak = useMemo(() => {
     const s = session;
     if (!s) return null;
-    const today = todayWib();
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
     return breaks.find((b) => b.staffId === s.staffId && b.day === today && !b.end) ?? null;
   }, [breaks, session]);
 
   const startBreak = useCallback(() => {
     const s = sessionRef.current;
     if (!s) return;
-    setBreaks((prev) => [...prev, { id: uid("brk"), staffId: s.staffId, day: todayWib(), start: Date.now(), end: null }]);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    setBreaks((prev) => [...prev, { id: uid("brk"), staffId: s.staffId, day: today, start: Date.now(), end: null }]);
   }, []);
 
   const endBreak = useCallback(() => {
@@ -477,13 +576,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const resetAll = useCallback(() => {
     clearAll();
     const c = seedCompany();
+    const s = seedSites();
     setCompany(c);
+    setSites(s);
+    setSiteId(s[0].id);
     setEmployees(seedEmployees());
     setShifts(seedShifts());
-    setLogs(seedLogs({ lat: c.hqLat, lon: c.hqLon }, c.radiusM));
+    setLogs(seedLogs(s));
     setLeaves(seedLeaves());
-    setPayslips([]);
     setOrg(seedOrgNodes());
+    setPayslips([]);
     setBreaks([]);
     setAudits(seedAudit());
     setNotifs(seedNotifs());
@@ -493,11 +595,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value: AppState = {
-    company, employees, logs, breaks, leaves, payslips, shifts, org, audits, notifs, settings,
+    company, sites, siteId, activeSite,
+    employees, siteEmployees, logs, siteLogs, breaks, leaves, payslips, shifts,
+    org, siteOrg, audits, notifs, settings,
     engine, geo, fence,
     session: sessionEmployee,
     tokenExp: session?.accessExp ?? 0,
-    login, logout, importIdentity,
+    login, logout, switchSite, updateSite, addSite, removeSite,
+    importIdentity,
     addEmployee, updateEmployee, removeEmployee, unbindDevice,
     addLog, clearLogs,
     addLeave, decideLeave,
@@ -511,10 +616,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
-}
-
-export function hqOf(c: Company) {
-  return { lat: c.hqLat, lon: c.hqLon };
 }
 
 export type { Role };

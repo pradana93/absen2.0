@@ -43,9 +43,10 @@ function toThumb(canvas: HTMLCanvasElement | null): string | null {
 }
 
 export default function AttendView({ initialType }: { initialType: AttendanceType }) {
-  const { session, employees, logs, breaks, shifts, company, settings, engine, geo, fence, addLog, audit } = useApp();
+  const { session, employees, logs, breaks, shifts, activeSite, settings, engine, geo, fence, addLog, audit } = useApp();
   const toast = useToast();
   const me = session!;
+  const company = activeSite; // geofence now follows the chosen Gudang/Area
 
   const [type, setType] = useState<AttendanceType>(initialType);
   useEffect(() => setType(initialType), [initialType]);
@@ -184,6 +185,7 @@ export default function AttendView({ initialType }: { initialType: AttendanceTyp
       setBusy(false);
       addLog({
         id: uid("log"), ts: Date.now(), staffId: me.staffId, name: me.name, department: me.department,
+        siteId: activeSite.id,
         type, lat: geo.lat, lon: geo.lon, distanceM,
         faceDist: best!.match.distance, method: "face", source, status: "REJECTED",
         reason: `Di luar radius (${formatMeters(distanceM)})`,
@@ -231,6 +233,7 @@ export default function AttendView({ initialType }: { initialType: AttendanceTyp
     setStep({ face: "ok", identity: "ok", fence: "ok" });
     addLog({
       id: uid("log"), ts: now, staffId: me.staffId, name: me.name, department: me.department,
+      siteId: activeSite.id,
       type, lat: geo.lat, lon: geo.lon, distanceM,
       faceDist: Math.round(best!.match.distance * 1000) / 1000,
       method: "face", source, status: "VERIFIED", reason: null,
@@ -257,6 +260,7 @@ export default function AttendView({ initialType }: { initialType: AttendanceTyp
     const now = Date.now();
     addLog({
       id: uid("log"), ts: now, staffId: me.staffId, name: me.name, department: me.department,
+      siteId: activeSite.id,
       type, lat: company.hqLat, lon: company.hqLon, distanceM: -1, faceDist: null,
       method: "manual", source: "manual", status: "VERIFIED", reason: "Dicatat manual (pengawas)",
     });

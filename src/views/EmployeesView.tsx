@@ -13,13 +13,12 @@ import {
   DEPARTMENTS, EMAIL_DOMAIN, EMAIL_RE, Employee, EmpStatus, genPassword, nextStaffId,
   ROLE_LABEL, Role, SalaryStructure, Shift, seedShifts, STATUS_LABEL,
 } from "../lib/database";
-import { extractSignature, FaceSignature } from "../lib/faceEngine";
+
 import { idr, relTime, todayKey, wibDayKey } from "../lib/format";
-import CameraCapture from "../components/CameraCapture";
 import { useToast } from "../components/Toast";
 import { Banner, Chip, ConfirmButton, EmptyState, InitialsAvatar, Modal } from "../components/bits";
 import {
-  IconCheck, IconCpu, IconEdit, IconFace, IconLock, IconMail, IconPlus, IconRefresh, IconShield, IconSmartphone, IconTrash, IconUsers, IconX,
+  IconCheck, IconEdit, IconFace, IconLock, IconMail, IconPlus, IconRefresh, IconShield, IconSmartphone, IconTrash, IconUsers, IconX,
 } from "../components/icons";
 
 const ROLE_OPTIONS: Role[] = ["employee", "manager", "companyadmin", "superadmin"];
@@ -27,7 +26,7 @@ const STATUS_OPTIONS: EmpStatus[] = ["active", "inactive", "resigned"];
 type ShiftId = string;
 
 export default function EmployeesView() {
-  const { session, employees, logs, shifts, engine, addEmployee, updateEmployee, removeEmployee, unbindDevice, audit } = useApp();
+  const { session, employees, logs, shifts, sites, activeSite, engine, addEmployee, updateEmployee, removeEmployee, unbindDevice, audit } = useApp();
   const toast = useToast();
   const isSuper = session?.role === "superadmin";
 
@@ -76,17 +75,15 @@ export default function EmployeesView() {
   const [department, setDepartment] = useState(DEPARTMENTS[0]);
   const [role, setRole] = useState<Role>("employee");
   const [shift, setShift] = useState<ShiftId>("sh-pagi");
+  const [fSite, setFSite] = useState<string | null>(activeSite?.id ?? null);
   const [err, setErr] = useState("");
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [sig, setSig] = useState<FaceSignature | null>(null);
-  const [encoding, setEncoding] = useState(false);
-
   const startWizard = () => {
     setOpen(true); setStep(1);
     setName(""); setStaffId(nextStaffId(employees));
     setEmail(""); setEmailTouched(false); setPassword(genPassword());
     setDepartment(DEPARTMENTS[0]); setRole("employee"); setShift("sh-pagi");
-    setErr(""); setPhoto(null); setSig(null);
+    setFSite(activeSite?.id ?? null);
+    setErr("");
   };
 
   const suggestedEmail = emailTouched ? email : name.trim() ? `${name.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s]/g, "").split(/\s+/).slice(0, 2).join(".")}@${EMAIL_DOMAIN}` : "";
@@ -98,14 +95,7 @@ export default function EmployeesView() {
     if (!EMAIL_RE.test(suggestedEmail)) return setErr("Email tidak valid.");
     if (employees.some((e) => e.email.toLowerCase() === suggestedEmail.toLowerCase())) return setErr("Email sudah terdaftar.");
     setErr("");
-    setStep(2);
-  };
-
-  const onCapture = async (canvas: HTMLCanvasElement, dataUrl: string) => {
-    setPhoto(dataUrl);
-    setEncoding(true);
-    setSig(await extractSignature(canvas));
-    setEncoding(false);
+    saveEmployee();
   };
 
   const saveEmployee = () => {
@@ -123,12 +113,14 @@ export default function EmployeesView() {
       position: role === "employee" ? "Staff" : ROLE_LABEL[role],
       role,
       shiftId: shift,
+      siteId: role === "superadmin" || role === "companyadmin" ? null : fSite,
       status: "active",
       salary: {
         basic: role === "employee" ? 5_200_000 : role === "manager" ? 8_000_000 : 9_500_000,
         transport: 20_000, meal: 15_000, otPerHour: role === "employee" ? 30_000 : 45_000,
       },
-      photo, descriptor: sig?.descriptor ?? null, hash: sig?.hash ?? null,
+      // base photo dikosongkan — karyawan mengambilnya sendiri saat login pertama
+      photo: null, descriptor: null, hash: null,
       createdAt: Date.now(),
       deviceId: null, deviceBoundAt: null, // bound at first login — never here
     };
@@ -140,8 +132,6 @@ export default function EmployeesView() {
     startWizard();
   };
 
-  const steps = ["Data Diri", "Foto Wajah", "Selesai"];
-
   /* ------------------------------ edit modal ------------------------------ */
   const [edit, setEdit] = useState<Employee | null>(null);
   const [eForm, setEForm] = useState<Partial<Omit<Employee, "salary">> & { salary?: Partial<SalaryStructure> }>({});
@@ -151,7 +141,7 @@ export default function EmployeesView() {
       name: e.name, nik: e.nik, phone: e.phone, address: e.address,
       emergencyName: e.emergencyName, emergencyPhone: e.emergencyPhone,
       department: e.department, position: e.position, shiftId: e.shiftId,
-      status: e.status, role: e.role,
+      status: e.status, role: e.role, siteId: e.siteId,
       salary: { ...e.salary },
     });
   };
@@ -187,19 +177,17 @@ export default function EmployeesView() {
       {/* wizard */}
       {open && (
         <section className="card anim-fade-up overflow-hidden">
-          <div className="flex items-center gap-2 border-b border-ink-100 bg-ink-50 px-4 py-3">
-            {steps.map((s, i) => (
-              <div key={s} className="flex flex-1 items-center gap-2">
-                <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full font-display text-[12px] font-bold ${
-                  step > i + 1 ? "bg-ok-500 text-white" : step === i + 1 ? "bg-sun-500 text-white shadow-[0_4px_12px_rgba(240,115,0,0.4)]" : "bg-ink-200 text-ink-500"
-                }`}>
-                  {step > i + 1 ? <IconCheck size={13} /> : i + 1}
-                </span>
-                <span className={`hidden text-[11px] font-extrabold tracking-wide uppercase min-[380px]:block ${step === i + 1 ? "text-ink-900" : "text-ink-400"}`}>{s}</span>
-                {i < 2 && <span className={`h-0.5 flex-1 rounded ${step > i + 1 ? "bg-ok-500" : "bg-ink-200"}`} />}
+          <div className="flex items-center justify-between border-b border-ink-100 bg-ink-50 px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-sun-400 to-sun-600 text-white shadow-[0_4px_12px_rgba(240,115,0,0.35)]">
+                <IconPlus size={16} />
+              </span>
+              <div>
+                <p className="font-display text-[15px] leading-tight font-extrabold text-ink-900">Buat Akun Karyawan</p>
+                <p className="text-[10.5px] font-bold text-ink-400">Data diri & kredensial — foto menyusul saat login pertama</p>
               </div>
-            ))}
-            <button onClick={() => setOpen(false)} className="ml-1 cursor-pointer rounded-lg p-1.5 text-ink-400 hover:bg-ink-100" aria-label="Tutup">
+            </div>
+            <button onClick={() => setOpen(false)} className="cursor-pointer rounded-lg p-1.5 text-ink-400 hover:bg-ink-100" aria-label="Tutup">
               <IconX size={15} />
             </button>
           </div>
@@ -250,6 +238,13 @@ export default function EmployeesView() {
                   </div>
                 </div>
                 <div>
+                  <label className="label">Gudang / Area</label>
+                  <select className="input !py-3 text-sm" value={fSite ?? ""} onChange={(e) => setFSite(e.target.value || null)}>
+                    <option value="">Semua Area (Kantor Pusat)</option>
+                    {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
                   <label className="label">Kata Sandi Awal</label>
                   <div className="flex items-center gap-2">
                     <input className="input !py-3 font-mono !text-[13.5px]" value={password} readOnly />
@@ -261,52 +256,18 @@ export default function EmployeesView() {
                     </button>
                   </div>
                 </div>
+                <div className="flex items-start gap-2.5 rounded-xl bg-sky-100/70 px-3 py-2.5">
+                  <IconFace size={16} className="mt-0.5 shrink-0 text-sky-600" />
+                  <p className="text-[11.5px] leading-relaxed font-semibold text-sky-600">
+                    <b>Foto tanda tangan tidak diminta di sini.</b> Karyawan akan mengambilnya sendiri saat login pertama —
+                    begitu wajah tersimpan, absensi wajah langsung aktif.
+                  </p>
+                </div>
                 <p className="rounded-xl bg-grape-100/70 px-3 py-2 text-[11.5px] leading-relaxed font-semibold text-grape-600">
                   Kredensial ditampilkan sekali setelah akun dibuat. Perangkat karyawan akan diikat otomatis saat login pertamanya.
                 </p>
                 {err && <Banner tone="warn">{err}</Banner>}
-                <button className="btn-sun w-full" onClick={submitData}>Lanjut ke Foto</button>
-              </div>
-            )}
-
-            {step === 2 && (
-              <div className="anim-fade-up space-y-3">
-                <Chip tone={engine === "ai" ? "teal" : "warn"}>
-                  <IconCpu size={12} /> {engine === "ai" ? "Encoding 128-D aktif" : "Mode lite — dHash"}
-                </Chip>
-                {!photo ? (
-                  <CameraCapture onCapture={(c, d) => void onCapture(c, d)} heightClass="h-60" captureLabel="Ambil Foto Tanda Tangan" />
-                ) : (
-                  <div className="space-y-3">
-                    <div className="relative overflow-hidden rounded-[22px]">
-                      <img src={photo} alt="Foto tanda tangan" className="h-56 w-full object-cover" />
-                      {sig?.faceFound && (
-                        <span className="absolute top-2.5 left-2.5 inline-flex items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-1 text-[10px] font-extrabold text-white backdrop-blur">
-                          <IconCheck size={11} /> WAJAH {(sig.faceScore * 100).toFixed(0)}%
-                        </span>
-                      )}
-                    </div>
-                    {encoding ? (
-                      <Banner tone="info" title="Mengekstrak encoding…">Menghitung vektor wajah dari foto.</Banner>
-                    ) : engine === "ai" && sig && !sig.faceFound ? (
-                      <Banner tone="warn" title="Wajah tidak terdeteksi">
-                        Foto tetap tersimpan dengan tanda tangan dHash; pencocokan AI tidak tersedia untuk profil ini.
-                      </Banner>
-                    ) : (
-                      <Banner tone="ok" title={sig?.descriptor ? "Encoding 128-D tersimpan" : "Tanda tangan dHash tersimpan"}>
-                        Baseline siap dipakai untuk absensi wajah.
-                      </Banner>
-                    )}
-                    <div className="flex gap-2">
-                      <button className="btn-ghost flex-1 !py-3 text-sm" onClick={() => { setPhoto(null); setSig(null); }}>
-                        <IconRefresh size={15} /> Ulangi
-                      </button>
-                      <button className="btn-sun flex-1 !py-3 text-sm" onClick={saveEmployee} disabled={encoding}>
-                        <IconCheck size={16} /> Simpan Akun
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <button className="btn-sun w-full" onClick={submitData}><IconCheck size={17} /> Buat Akun</button>
               </div>
             )}
           </div>
@@ -459,6 +420,13 @@ export default function EmployeesView() {
                 <label className="label">Shift</label>
                 <select className="input !py-2.5 text-sm" value={eForm.shiftId} onChange={(e) => setEForm({ ...eForm, shiftId: e.target.value })}>
                   {shiftList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Gudang / Area</label>
+                <select className="input !py-2.5 text-sm" value={eForm.siteId ?? ""} onChange={(e) => setEForm({ ...eForm, siteId: e.target.value || null })}>
+                  <option value="">Semua Area (Pusat)</option>
+                  {sites.map((s) => <option key={s.id} value={s.id}>{s.shortName}</option>)}
                 </select>
               </div>
               <div>

@@ -12,7 +12,7 @@ import { Banner, Chip, EmptyState, Modal } from "../components/bits";
 import { IconCheck, IconEdit, IconLock, IconPlus, IconUsers, IconX } from "../components/icons";
 
 export default function OrgView() {
-  const { session, company, employees, org, addOrgNode, updateOrgNode, removeOrgNode, audit } = useApp();
+  const { session, company, employees, siteOrg: org, activeSite, addOrgNode, updateOrgNode, removeOrgNode, audit } = useApp();
   const toast = useToast();
   const me = session!;
   const isAdmin = me.role === "companyadmin" || me.role === "superadmin";
@@ -68,7 +68,7 @@ export default function OrgView() {
     if (!fStaffId && fName.trim().length < 3) return setFErr("Pilih karyawan atau isi nama penghuni posisi.");
     if (modal.mode === "add") {
       addOrgNode({
-        id: uid("org"), parentId: modal.parentId, title: fTitle.trim(),
+        id: uid("org"), parentId: modal.parentId, siteId: activeSite.id, title: fTitle.trim(),
         staffId: fStaffId || null, name: fStaffId ? null : fName.trim(),
         note: fNote.trim() || null, createdAt: Date.now(),
       });
