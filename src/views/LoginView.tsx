@@ -30,7 +30,7 @@ function LiveClockPill() {
 }
 
 export default function LoginView() {
-  const { company, sites, activeSite, login, importIdentity } = useApp();
+  const { company, sites, activeSite, login, importIdentity, requestReset, consumeReset, resetPassword } = useApp();
   const toast = useToast();
 
   /* remembered site → start straight on credentials for a fast return visit */
@@ -77,6 +77,67 @@ export default function LoginView() {
     importIdentity(id, "kode manual");
     setCodeMsg({ ok: true, text: `Identitas "${id.appName}" diterapkan. Silakan login.` });
     toast.push("ok", "Identitas tenant diterapkan", id.appName);
+  };
+
+  /* ------------------------- forgot password flow ------------------------- */
+  const [fpMode, setFpMode] = useState<null | "request" | "inbox" | "reset">(null);
+  const [fpEmail, setFpEmail] = useState("");
+  const [fpToken, setFpToken] = useState("");
+  const [fpName, setFpName] = useState("");
+  const [fpNew, setFpNew] = useState("");
+  const [fpConfirm, setFpConfirm] = useState("");
+  const [fpErr, setFpErr] = useState("");
+  const [fpBusy, setFpBusy] = useState(false);
+
+  /* A real emailed link would arrive as …#reset=<token> — honor it on load */
+  useEffect(() => {
+    const m = window.location.hash.match(/^#reset=(.+)$/);
+    if (!m) return;
+    const res = consumeReset(decodeURIComponent(m[1]));
+    if (res.ok) {
+      setPhase("auth");
+      if (!site && sites.length) setSite(sites[0]);
+      setFpToken(decodeURIComponent(m[1]));
+      setFpName(res.name ?? "");
+      setFpMode("reset");
+      setFpErr("");
+    } else {
+      setFpErr(res.error ?? "Tautan reset tidak valid.");
+      setFpMode("request");
+    }
+    window.history.replaceState(null, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const submitForgot = () => {
+    if (!fpEmail.trim()) return setFpErr("Isi email terdaftar Anda.");
+    setFpBusy(true);
+    setFpErr("");
+    window.setTimeout(() => {
+      const res = requestReset(fpEmail);
+      setFpBusy(false);
+      if (!res.ok || !res.token) return setFpErr(res.error ?? "Gagal mengirim tautan.");
+      setFpToken(res.token.token);
+      setFpMode("inbox");
+      toast.push("info", "Tautan reset dikirim", `Ke ${fpEmail.trim()} (simulasi inbox).`);
+    }, 700);
+  };
+
+  const openResetLink = () => {
+    const res = consumeReset(fpToken);
+    if (!res.ok) return setFpErr(res.error ?? "Tautan tidak valid.");
+    setFpName(res.name ?? "");
+    setFpErr("");
+    setFpMode("reset");
+  };
+
+  const submitReset = () => {
+    if (fpNew.length < 6) return setFpErr("Kata sandi minimal 6 karakter.");
+    if (fpNew !== fpConfirm) return setFpErr("Konfirmasi kata sandi tidak sama.");
+    const res = resetPassword(fpToken, fpNew);
+    if (!res.ok) return setFpErr(res.error ?? "Reset gagal.");
+    toast.push("ok", "Kata sandi diperbarui", `Silakan masuk, ${fpName || "rekan"}.`);
+    setFpMode(null); setFpToken(""); setFpNew(""); setFpConfirm(""); setFpErr("");
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -196,8 +257,94 @@ export default function LoginView() {
                 <IconArrowRight size={14} className="shrink-0 rotate-180 text-ink-300 transition group-hover:-translate-x-0.5 group-hover:text-sun-600" />
               </button>
 
-              <p className="text-[10.5px] font-extrabold tracking-[0.16em] text-sun-600 uppercase">Langkah 2 dari 2 · Masuk</p>
+              <p className="text-[10.5px] font-extrabold tracking-[0.16em] text-sun-600 uppercase">
+                {fpMode ? "Pemulihan Akun" : "Langkah 2 dari 2 · Masuk"}
+              </p>
 
+              {fpMode === "request" && (
+                <div className="anim-fade-up mt-2 space-y-3.5">
+                  <p className="text-[12px] leading-relaxed font-semibold text-ink-400">
+                    Masukkan email terdaftar — kami kirimkan tautan reset yang berlaku <b>30 menit</b> dan hanya bisa dipakai sekali.
+                  </p>
+                  <div>
+                    <label className="label">Email terdaftar</label>
+                    <div className="field-wrap">
+                      <IconMail size={17} className="field-ico" />
+                      <input type="email" className="input" placeholder="nama@perusahaan.co.id" value={fpEmail} onChange={(e) => setFpEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitForgot()} />
+                    </div>
+                  </div>
+                  {fpErr && <p className="rounded-xl bg-danger-100 px-3.5 py-2.5 text-[12.5px] font-bold text-danger-600">{fpErr}</p>}
+                  <button className="btn-sun w-full !py-4 text-base" onClick={submitForgot} disabled={fpBusy}>
+                    {fpBusy ? "Mengirim tautan…" : <>Kirim Tautan Reset <IconArrowRight size={18} /></>}
+                  </button>
+                  <button className="w-full cursor-pointer text-center text-[12px] font-extrabold text-ink-400 underline decoration-dotted underline-offset-4 hover:text-sun-600" onClick={() => { setFpMode(null); setFpErr(""); }}>
+                    Kembali ke login
+                  </button>
+                </div>
+              )}
+
+              {fpMode === "inbox" && (
+                <div className="anim-fade-up mt-2 space-y-3.5">
+                  <p className="text-[12px] leading-relaxed font-semibold text-ink-400">
+                    Tautan terkirim ke <b className="text-ink-700">{fpEmail}</b>. Karena build ini belum terhubung ke server email, inbox-nya disimulasikan di bawah — di produksi, email sungguhan yang tiba.
+                  </p>
+                  <div className="overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-[0_16px_40px_rgba(23,42,89,0.12)]">
+                    <div className="flex items-center gap-2 border-b border-ink-100 bg-ink-50 px-3.5 py-2">
+                      <span className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-sun-400 to-sun-600 text-white"><IconMail size={14} /></span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[11.5px] font-extrabold text-ink-900">{company.appName ?? "Vittoria HR"} · Reset Kata Sandi</p>
+                        <p className="truncate font-mono text-[9.5px] font-bold text-ink-400">no-reply@vittoria.co.id → {fpEmail}</p>
+                      </div>
+                      <span className="chip-ok !px-1.5 !py-0.5 !text-[8.5px]">BARU</span>
+                    </div>
+                    <div className="space-y-2.5 p-3.5">
+                      <p className="text-[12px] leading-relaxed font-semibold text-ink-500">
+                        Anda meminta reset kata sandi. Klik tombol di bawah atau salin kode token. Abaikan jika bukan Anda.
+                      </p>
+                      <button className="btn-sun w-full !py-3 !text-[14px]" onClick={openResetLink}>
+                        <IconLock size={15} /> Atur Ulang Kata Sandi
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <code className="min-w-0 flex-1 truncate rounded-lg bg-ink-50 px-2.5 py-1.5 font-mono text-[10.5px] font-bold text-ink-500">{fpToken}</code>
+                        <button className="btn-ghost !rounded-lg !px-2.5 !py-1.5 !text-[10.5px]" onClick={() => { navigator.clipboard?.writeText(fpToken).catch(() => undefined); toast.push("ok", "Token disalin"); }}>Salin</button>
+                      </div>
+                      <p className="text-[9.5px] font-bold text-ink-300">Berlaku 30 menit · sekali pakai · tercatat di audit</p>
+                    </div>
+                  </div>
+                  {fpErr && <p className="rounded-xl bg-danger-100 px-3.5 py-2.5 text-[12.5px] font-bold text-danger-600">{fpErr}</p>}
+                  <button className="w-full cursor-pointer text-center text-[12px] font-extrabold text-ink-400 underline decoration-dotted underline-offset-4 hover:text-sun-600" onClick={() => { setFpMode(null); setFpErr(""); }}>
+                    Kembali ke login
+                  </button>
+                </div>
+              )}
+
+              {fpMode === "reset" && (
+                <div className="anim-fade-up mt-2 space-y-3.5">
+                  <p className="text-[12px] leading-relaxed font-semibold text-ink-400">
+                    Tautan valid{fpName ? <> untuk <b className="text-ink-700">{fpName}</b></> : ""}. Buat kata sandi baru — minimal 6 karakter.
+                  </p>
+                  <div>
+                    <label className="label">Kata sandi baru</label>
+                    <div className="field-wrap">
+                      <IconLock size={17} className="field-ico" />
+                      <input type="password" className="input" value={fpNew} onChange={(e) => setFpNew(e.target.value)} autoComplete="new-password" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Ulangi kata sandi baru</label>
+                    <div className="field-wrap">
+                      <IconLock size={17} className="field-ico" />
+                      <input type="password" className="input" value={fpConfirm} onChange={(e) => setFpConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitReset()} autoComplete="new-password" />
+                    </div>
+                  </div>
+                  {fpErr && <p className="rounded-xl bg-danger-100 px-3.5 py-2.5 text-[12.5px] font-bold text-danger-600">{fpErr}</p>}
+                  <button className="btn-sun w-full !py-4 text-base" onClick={submitReset} disabled={!fpNew || !fpConfirm}>
+                    Simpan & Kembali ke Login
+                  </button>
+                </div>
+              )}
+
+              {fpMode === null && (
               <form key={shakeKey} onSubmit={(e) => void submit(e)} className={`mt-2 space-y-3.5 ${error ? "anim-shake" : ""}`}>
                 <div>
                   <label className="label">Email</label>
@@ -226,7 +373,16 @@ export default function LoginView() {
                 <div className="flex items-center justify-center gap-2 pt-1 text-[10.5px] font-bold text-ink-300">
                   <IconShield size={12} /> Sesi JWT · perangkat diikat saat login pertama
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => { setFpMode("request"); setFpErr(""); setFpEmail(email); }}
+                  className="w-full cursor-pointer text-center text-[12px] font-extrabold text-sun-700 underline decoration-dotted underline-offset-4 transition hover:text-sun-600"
+                >
+                  Lupa kata sandi?
+                </button>
               </form>
+              )}
             </div>
           )}
         </div>
@@ -255,7 +411,7 @@ export default function LoginView() {
         </div>
 
         <p className="mt-5 text-center text-[10.5px] font-bold text-ink-300">
-          Belum punya akun atau lupa kata sandi? Akun dibuat & dipulihkan oleh Admin HR perusahaan Anda.
+          Belum punya akun? Minta Admin HR membuatkan. Lupa sandi? Gunakan “Lupa kata sandi?” di atas.
         </p>
         <span className="hidden">{encodeIdentity(company)}</span>
       </div>

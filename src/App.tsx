@@ -27,15 +27,16 @@ import AuditView from "./views/AuditView";
 import OrgView from "./views/OrgView";
 import LiveOpsView from "./views/LiveOpsView";
 import PengumumanView from "./views/PengumumanView";
+import MasterDataView, { LockedVault } from "./views/MasterDataView";
 import {
-  IconArrowRight, IconBell, IconBriefcase, IconBuilding, IconCamera, IconClipboard, IconCpu,
+  IconArrowRight, IconBell, IconBriefcase, IconBuilding, IconCamera, IconClipboard, IconCpu, IconDatabase,
   IconGear, IconGrid, IconHistory, IconHome, IconLogoutIn, IconShield, IconSignal, IconUsers, IconX,
 } from "./components/icons";
 
 export type ViewId =
   | "home" | "dashboard" | "absen" | "riwayat" | "pengguna"
   | "cuti" | "gaji" | "profil" | "aturan" | "audit" | "org"
-  | "kendali" | "pengumuman";
+  | "kendali" | "pengumuman" | "masterdata";
 export type NavFn = (v: ViewId, type?: AttendanceType) => void;
 
 interface BIPEvent extends Event {
@@ -90,6 +91,7 @@ const FEATURES: Record<Role, FeatureDef[]> = {
     { id: "aturan", label: "Aturan", group: "Perusahaan", desc: "Geofence, shift & libur", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconGear size={s} /> },
   ],
   superadmin: [
+    { id: "masterdata", label: "Master Data", group: "Sistem", desc: "Data induk · hanya Super Admin", tint: "bg-ink-900 text-sun-400", icon: (s) => <IconDatabase size={s} /> },
     { id: "kendali", label: "R. Kendali", group: "Operasional", desc: "Papan live gudang", tint: "bg-ink-900 text-sun-400", icon: (s) => <IconCpu size={s} /> },
     { id: "pengumuman", label: "Pengumuman", group: "Info", desc: "Posting & pantau konfirmasi", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconBell size={s} /> },
     { id: "org", label: "Struktur", group: "Perusahaan", desc: "Susun hierarki", tint: "bg-coral-100 text-coral-600", icon: (s) => <IconBuilding size={s} /> },
@@ -356,6 +358,21 @@ function Shell() {
   /* Ruang Kendali — full-bleed dark ops board (escapes the phone frame) */
   if (view === "kendali") {
     return <LiveOpsView onExit={() => nav(HOME[role])} />;
+  }
+
+  /* Master Data — Super Admin vault (wide canvas for tables) */
+  if (view === "masterdata") {
+    if (role !== "superadmin") return <LockedVault />;
+    return (
+      <div className="app-bg min-h-dvh">
+        <div className="mx-auto w-full max-w-3xl px-4 py-6">
+          <MasterDataView />
+          <button className="btn-ghost mx-auto mt-4 flex !py-2.5 !text-[13px]" onClick={() => nav(HOME[role])}>
+            <IconArrowRight size={14} className="rotate-180" /> Kembali ke Dashboard
+          </button>
+        </div>
+      </div>
+    );
   }
 
   /* maintenance mode — admins keep access */
