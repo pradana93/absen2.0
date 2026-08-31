@@ -593,7 +593,7 @@ export default function SettingsView() {
       </section>
 
       <footer className="pt-1 pb-2 text-center text-[11px] font-bold tracking-wide text-ink-300">
-        {company.appName} · v6.2 · semua waktu WIB · {formatMeters(company.radiusM)} radius
+        {company.appName} · v6.2 · semua waktu WIB · {activeSite?.shortName ?? "—"} · radius {activeSite?.radiusM ?? "—"} m
       </footer>
     </div>
   );

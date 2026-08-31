@@ -5,7 +5,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppProvider, useApp } from "./lib/store";
-import { AttendanceType, ROLE_LABEL, Role } from "./lib/database";
+import { AttendanceType, ROLE_LABEL, Role, SITE_STYLE } from "./lib/database";
 import { fmtExpLeft } from "./lib/jwt";
 import { todayKey } from "./lib/format";
 import { Chip, InitialsAvatar } from "./components/bits";
@@ -26,7 +26,7 @@ import AuditView from "./views/AuditView";
 import OrgView from "./views/OrgView";
 import {
   IconBell, IconBriefcase, IconBuilding, IconCamera, IconClipboard, IconCpu,
-  IconGear, IconGrid, IconHistory, IconHome, IconLogoutIn, IconShield, IconSignal, IconUsers, IconWallet, IconX,
+  IconArrowRight, IconGear, IconGrid, IconHistory, IconHome, IconLogoutIn, IconShield, IconSignal, IconUsers, IconWallet, IconX,
 } from "./components/icons";
 
 export type ViewId =
@@ -182,6 +182,55 @@ function LogoutBtn() {
   );
 }
 
+function SiteSwitcher() {
+  const { session, sites, activeSite, switchSite } = useApp();
+  const [open, setOpen] = useState(false);
+  const isAdmin = session?.role === "superadmin" || session?.role === "companyadmin";
+  const canSwitch = isAdmin || !session?.siteId; // staff pinned to their own site
+  const st = activeSite ? SITE_STYLE[activeSite.color] : null;
+
+  if (!activeSite) return null;
+  return (
+    <div className="relative">
+      <button
+        onClick={() => canSwitch && setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 rounded-xl border border-ink-100 bg-white px-2.5 py-1.5 transition active:scale-95 ${canSwitch ? "cursor-pointer hover:border-ink-200 hover:shadow-sm" : "cursor-default"}`}
+        aria-label="Gudang aktif"
+      >
+        <span className={`h-2 w-2 shrink-0 rounded-full ${st?.dot ?? "bg-ink-300"}`} />
+        <span className="max-w-24 truncate text-[11px] font-extrabold text-ink-800">{activeSite.shortName}</span>
+        {canSwitch && <IconArrowRight size={11} className={`text-ink-300 transition-transform ${open ? "rotate-90" : ""}`} />}
+      </button>
+      {open && canSwitch && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="anim-pop absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-ink-100 bg-white p-1.5 shadow-[0_24px_60px_rgba(23,42,89,0.22)]">
+            <p className="px-2.5 pt-1.5 pb-1 text-[9.5px] font-extrabold tracking-[0.14em] text-ink-400 uppercase">Gudang / Area</p>
+            {sites.map((s) => {
+              const sst = SITE_STYLE[s.color];
+              const active = s.id === activeSite.id;
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => { switchSite(s.id); setOpen(false); }}
+                  className={`flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition hover:bg-ink-50 ${active ? "bg-sun-100/70" : ""}`}
+                >
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${sst.dot}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12.5px] leading-tight font-extrabold text-ink-900">{s.name}</span>
+                    <span className="block font-mono text-[9.5px] font-bold text-ink-400">radius {s.radiusM} m</span>
+                  </span>
+                  {active && <span className="h-1.5 w-1.5 rounded-full bg-sun-500" />}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Shell() {
   const { session, company, leaves, payslips, org, audits, engine, geo, fence, tokenExp, logout } = useApp();
   const toast = useToast();
@@ -328,6 +377,7 @@ function Shell() {
                 <IconCpu size={11} /> {engine === "ai" ? "AI" : engine === "lite" ? "LITE" : "…"}
               </Chip>
             </div>
+            <SiteSwitcher />
             <Chip tone={geoTone(geo?.status)}>
               <IconSignal size={11} /> {geoLabel(geo?.status, geo?.simulated)}
             </Chip>
