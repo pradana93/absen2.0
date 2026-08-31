@@ -5,8 +5,13 @@
  * (persisted to IndexedDB). Fase 2: the same collections map onto Postgres.
  */
 import { uid, wibDayKey } from "./format";
-import { readCollection, SPECS, syncCollection } from "./sql/bridge";
-import { sqlGetMeta, sqlReady, sqlSetMeta } from "./sql/engine";
+
+/* SQL engine + bridge load lazily so the ~1 MB WASM never delays first paint.
+   Module refs are cached once the store's boot effect resolves them. */
+let bridgeMod: typeof import("./sql/bridge") | null = null;
+let engineMod: typeof import("./sql/engine") | null = null;
+const bridge = () => import("./sql/bridge").then((m) => { bridgeMod = m; return m; });
+const engine = () => import("./sql/engine").then((m) => { engineMod = m; return m; });
 
 /* --------------------------------- types -------------------------------- */
 export type Role = "employee" | "manager" | "companyadmin" | "superadmin";
@@ -147,9 +152,11 @@ function save(key: string, value: unknown) {
   try { localStorage.setItem(NS + key, JSON.stringify(value)); } catch {
     try { window.dispatchEvent(new Event("vittoria:storage-full")); } catch { /* noop */ }
   }
-  if (sqlReady() && SPECS[key]) {
+  if (bridgeMod && engineMod?.sqlReady() && bridgeMod.SPECS[key]) {
     const rows = key === "company" ? [value as Record<string, unknown>] : (value as Record<string, unknown>[]);
-    if (Array.isArray(rows)) syncCollection(key, rows);
+    if (Array.isArray(rows)) bridgeMod.syncCollection(key, rows);
+  } else if (!bridgeMod) {
+    void bridge(); // warm the module; the boot migration syncs everything anyway
   }
 }
 
@@ -388,10 +395,12 @@ export const db = {
 
 /* --------------------- SQL boot: one-way migration ---------------------- */
 /** After the engine is ready: if SQL is empty but the cache is seeded, copy everything in. */
-export function bootSqlSync() {
-  if (!sqlReady()) return;
-  if (sqlGetMeta("migrated") === "1") return;
-  const push = (key: string, rows: Record<string, unknown>[]) => { if (rows.length) syncCollection(key, rows); };
+export async function bootSqlSync() {
+  const eng = await engine();
+  const br = await bridge();
+  if (!eng.sqlReady()) return;
+  if (eng.sqlGetMeta("migrated") === "1") return;
+  const push = (key: string, rows: Record<string, unknown>[]) => { if (rows.length) br.syncCollection(key, rows); };
   push("company", [db.loadCompany() as unknown as Record<string, unknown>]);
   push("sites", db.loadSites() as unknown as Record<string, unknown>[]);
   push("employees", db.loadEmployees() as unknown as Record<string, unknown>[]);
@@ -407,20 +416,23 @@ export function bootSqlSync() {
   push("notifs", db.loadNotifs() as unknown as Record<string, unknown>[]);
   push("breaks", db.loadBreaks() as unknown as Record<string, unknown>[]);
   push("resets", db.loadResets() as unknown as Record<string, unknown>[]);
-  sqlSetMeta("migrated", "1");
-  sqlSetMeta("migrated_at", String(Date.now()));
+  eng.sqlSetMeta("migrated", "1");
+  eng.sqlSetMeta("migrated_at", String(Date.now()));
 }
 
 /** Hydrate collections from SQL (source of truth once migrated). */
-export function hydrateFromSql(): Record<string, unknown[]> | null {
-  if (!sqlReady() || sqlGetMeta("migrated") !== "1") return null;
+export async function hydrateFromSql(): Promise<Record<string, unknown[]> | null> {
+  const eng = await engine();
+  if (!eng.sqlReady() || eng.sqlGetMeta("migrated") !== "1") return null;
+  const br = await bridge();
+  const read = <T,>(key: string): T[] => br.readCollection<T>(key);
   return {
-    company: readCollection("company"), sites: readCollection("sites"), employees: readCollection("employees"),
-    logs: readCollection("logs"), leaves: readCollection("leaves"), shifts: readCollection("shifts"),
-    org: readCollection("org"), board: readCollection("board"), departments: readCollection("departments"),
-    quotas: readCollection("quotas"), salarydefaults: readCollection("salarydefaults"),
-    audits: readCollection("audits"), notifs: readCollection("notifs"), breaks: readCollection("breaks"),
-    resets: readCollection("resets"),
+    company: read("company"), sites: read("sites"), employees: read("employees"),
+    logs: read("logs"), leaves: read("leaves"), shifts: read("shifts"),
+    org: read("org"), board: read("board"), departments: read("departments"),
+    quotas: read("quotas"), salarydefaults: read("salarydefaults"),
+    audits: read("audits"), notifs: read("notifs"), breaks: read("breaks"),
+    resets: read("resets"),
   };
 }
 

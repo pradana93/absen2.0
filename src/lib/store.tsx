@@ -17,7 +17,11 @@ import { EngineStatus, initFaceEngine, onEngineStatus } from "./faceEngine";
 import { issueTokens, SessionState } from "./jwt";
 import { getDeviceId, shortDevice } from "./device";
 import { bootSqlSync } from "./database";
-import { initSqlEngine, sqlConsole, sqlExportBytes, onSqlStatus, sqlStats, sqlVacuum, SqlMeta, SqlResult } from "./sql/engine";
+import type { SqlMeta, SqlResult } from "./sql/engine";
+
+/* SQL engine loads lazily — WASM stays out of the critical path */
+let sqlEng: typeof import("./sql/engine") | null = null;
+const sqlEngine = () => import("./sql/engine").then((m) => { sqlEng = m; return m; });
 
 export interface LoginResult { ok: boolean; error?: string; }
 
@@ -194,12 +198,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return off;
   }, []);
 
-  /* embedded SQL: boot → migrate cache → hydrate → live stats */
+  /* embedded SQL: lazy-load WASM → boot → migrate cache → hydrate → live stats */
   useEffect(() => {
-    const off = onSqlStatus(() => setSql(sqlStats()));
-    void initSqlEngine().then(() => {
-      bootSqlSync();
-      const h = hydrateFromSql();
+    let disposed = false;
+    let off: (() => void) | null = null;
+    void sqlEngine().then(async (eng) => {
+      if (disposed) return;
+      off = eng.onSqlStatus(() => setSql(eng.sqlStats()));
+      await eng.initSqlEngine();
+      if (disposed) return;
+      await bootSqlSync();
+      const h = await hydrateFromSql();
+      if (disposed) return;
       if (h) {
         if ((h.employees as Employee[]).length) setEmployees(h.employees as Employee[]);
         if ((h.logs as AttendanceLog[]).length) setLogs(h.logs as AttendanceLog[]);
@@ -231,26 +241,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           });
         }
       }
-      setSql(sqlStats());
+      setSql(eng.sqlStats());
     });
-    const onPersisted = () => setSql(sqlStats());
+    const onPersisted = () => { if (sqlEng) setSql(sqlEng.sqlStats()); };
     window.addEventListener("vittoria:sql-persisted", onPersisted);
-    return () => { off(); window.removeEventListener("vittoria:sql-persisted", onPersisted); };
+    return () => { disposed = true; off?.(); window.removeEventListener("vittoria:sql-persisted", onPersisted); };
   }, []);
 
-  const refreshSql = useCallback(() => setSql(sqlStats()), []);
-  const runSql = useCallback((q: string) => sqlConsole(q), []);
+  const refreshSql = useCallback(() => { void sqlEngine().then((e) => setSql(e.sqlStats())); }, []);
+  const runSql = useCallback(
+    (q: string) =>
+      sqlEng ? sqlEng.sqlConsole(q) : { ok: false as const, error: "Mesin SQL belum siap — coba sesaat lagi." },
+    [],
+  );
   const exportSqlFile = useCallback(() => {
-    const bytes = sqlExportBytes();
-    if (!bytes) return;
-    const blob = new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `vittoria-${new Date().toISOString().slice(0, 10)}.sqlite`;
-    a.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    void sqlEngine().then((eng) => {
+      const bytes = eng.sqlExportBytes();
+      if (!bytes) return;
+      const blob = new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `vittoria-${new Date().toISOString().slice(0, 10)}.sqlite`;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    });
   }, []);
-  const vacuumSql = useCallback(() => { sqlVacuum(); setSql(sqlStats()); }, []);
+  const vacuumSql = useCallback(() => { void sqlEngine().then((e) => { e.sqlVacuum(); setSql(e.sqlStats()); }); }, []);
 
   /* live GPS */
   useEffect(() => {
