@@ -6,13 +6,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { NavFn } from "../App";
 import { useApp } from "../lib/store";
+import { useToast } from "../components/Toast";
 import { daySummary, LEAVE_QUOTAS, leaveUsed } from "../lib/database";
 import { formatMeters, GeoReading } from "../lib/geoUtils";
 import { fmtDuration, relTime, todayKey, wibClock, wibDate, wibDayKey, wibTime } from "../lib/format";
 import { Chip, InitialsAvatar, SectionLabel } from "../components/bits";
 import {
-  IconArrowRight, IconBriefcase, IconBuilding, IconCamera, IconCheck, IconClock, IconCoffee,
-  IconFace, IconFlame, IconHistory, IconMoon, IconPin, IconSignal, IconStar, IconSun, IconUsers, IconWallet, IconX,
+  IconArrowRight, IconBell, IconBriefcase, IconBuilding, IconCamera, IconCheck, IconClock, IconCoffee,
+  IconFace, IconFlame, IconHistory, IconInfo, IconMoon, IconPin, IconSignal, IconStar, IconSun, IconUsers, IconWallet, IconX,
 } from "../components/icons";
 
 function wibHourNow(): number {
@@ -272,7 +273,8 @@ function WeekStrip() {
 }
 
 export default function HomeView({ nav }: { nav: NavFn }) {
-  const { session, logs, leaves, employees, fence, geo, company, shifts } = useApp();
+  const { session, logs, leaves, employees, fence, geo, company, shifts, board, ackBoard, activeSite } = useApp();
+  const toast = useToast();
   const me = session!;
   const today = todayKey();
   const myShift = shifts.find((s) => s.id === me.shiftId);
@@ -308,11 +310,15 @@ export default function HomeView({ nav }: { nav: NavFn }) {
   const hasFace = !!me.descriptor || !!me.hash;
   const part = partOfDay(wibHourNow());
 
+  /* unread announcements for this user's site (or global) */
+  const myPosts = board.filter((p) => p.siteId === null || p.siteId === activeSite.id);
+  const unreadPost = myPosts.find((p) => !p.acks.includes(me.staffId));
+
   const quick = [
     { label: "Absensi", icon: <IconCamera size={18} />, tint: "bg-sun-100 text-sun-600", onClick: () => nav("absen", inLog && !outLog ? "OUT" : "IN") },
     { label: "Cuti", icon: <IconBriefcase size={18} />, tint: "bg-sky-100 text-sky-600", onClick: () => nav("cuti") },
+    { label: "Pengumuman", icon: <IconBell size={18} />, tint: "bg-sky-100 text-sky-600", onClick: () => nav("pengumuman") },
     { label: "Struktur", icon: <IconBuilding size={18} />, tint: "bg-coral-100 text-coral-600", onClick: () => nav("org") },
-    { label: "Riwayat", icon: <IconHistory size={18} />, tint: "bg-grape-100 text-grape-600", onClick: () => nav("riwayat") },
   ];
 
   return (
@@ -422,10 +428,39 @@ export default function HomeView({ nav }: { nav: NavFn }) {
         </div>
       )}
 
+      {/* unread announcement teaser */}
+      {unreadPost && (
+        <section className={`card anim-fade-up border-l-4 p-4 ${
+          unreadPost.tone === "danger" ? "border-l-danger-500" : unreadPost.tone === "warn" ? "border-l-warn-500" : unreadPost.tone === "ok" ? "border-l-ok-500" : "border-l-sky-500"
+        }`}>
+          <div className="flex items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-sky-100 text-sky-600"><IconInfo size={17} /></span>
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-1.5 text-[13px] font-extrabold text-ink-900">
+                <span className="truncate">{unreadPost.title}</span>
+                <Chip tone="sky" className="!px-1.5 !py-0.5 !text-[8.5px]">BARU</Chip>
+              </p>
+              <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-snug font-semibold text-ink-400">{unreadPost.body}</p>
+            </div>
+          </div>
+          <div className="mt-2.5 flex gap-2">
+            <button
+              className="btn-sun flex-1 !py-2 !text-[12px]"
+              onClick={() => { ackBoard(unreadPost.id); toast.push("ok", "Sudah dibaca", "Konfirmasi Anda tercatat."); }}
+            >
+              <IconCheck size={13} /> Mengerti
+            </button>
+            <button className="btn-ghost flex-1 !py-2 !text-[12px]" onClick={() => nav("pengumuman")}>
+              Selengkapnya <IconArrowRight size={12} />
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* quick actions */}
       <section>
         <SectionLabel>Aksi Cepat</SectionLabel>
-        <div className="grid grid-cols-4 gap-2.5">
+        <div className="grid grid-cols-2 gap-2.5 min-[400px]:grid-cols-4">
           {quick.map((q) => (
             <button key={q.label} onClick={q.onClick} className="card card-press flex flex-col items-center gap-2 py-3.5">
               <span className={`grid h-11 w-11 place-items-center rounded-2xl ${q.tint}`}>{q.icon}</span>

@@ -25,14 +25,17 @@ import ProfileView from "./views/ProfileView";
 import SettingsView from "./views/SettingsView";
 import AuditView from "./views/AuditView";
 import OrgView from "./views/OrgView";
+import LiveOpsView from "./views/LiveOpsView";
+import PengumumanView from "./views/PengumumanView";
 import {
-  IconBell, IconBriefcase, IconBuilding, IconCamera, IconClipboard, IconCpu,
-  IconArrowRight, IconGear, IconGrid, IconHistory, IconHome, IconLogoutIn, IconShield, IconSignal, IconUsers, IconWallet, IconX,
+  IconArrowRight, IconBell, IconBriefcase, IconBuilding, IconCamera, IconClipboard, IconCpu,
+  IconGear, IconGrid, IconHistory, IconHome, IconLogoutIn, IconShield, IconSignal, IconUsers, IconX,
 } from "./components/icons";
 
 export type ViewId =
   | "home" | "dashboard" | "absen" | "riwayat" | "pengguna"
-  | "cuti" | "gaji" | "profil" | "aturan" | "audit" | "org";
+  | "cuti" | "gaji" | "profil" | "aturan" | "audit" | "org"
+  | "kendali" | "pengumuman";
 export type NavFn = (v: ViewId, type?: AttendanceType) => void;
 
 interface BIPEvent extends Event {
@@ -70,30 +73,40 @@ const DOCK: Record<Role, TabDef[]> = {
 /** The Fitur sheet — secondary modules, with live context badges. */
 const FEATURES: Record<Role, FeatureDef[]> = {
   employee: [
-    { id: "gaji", label: "Gaji", group: "Keuangan", desc: "Slip & ringkasan bulanan", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconWallet size={s} /> },
+    { id: "pengumuman", label: "Pengumuman", group: "Info", desc: "Kabar & konfirmasi tim", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconBell size={s} /> },
     { id: "org", label: "Struktur", group: "Perusahaan", desc: "Hierarki perusahaan", tint: "bg-coral-100 text-coral-600", icon: (s) => <IconBuilding size={s} /> },
     { id: "profil", label: "Profil", group: "Akun", desc: "Data diri & keamanan", tint: "bg-grape-100 text-grape-600", icon: (s) => <IconUsers size={s} /> },
   ],
   manager: [
-    { id: "gaji", label: "Gaji", group: "Keuangan", desc: "Slip & ringkasan bulanan", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconWallet size={s} /> },
+    { id: "kendali", label: "R. Kendali", group: "Operasional", desc: "Papan live gudang", tint: "bg-ink-900 text-sun-400", icon: (s) => <IconCpu size={s} /> },
+    { id: "pengumuman", label: "Pengumuman", group: "Info", desc: "Kabar & konfirmasi tim", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconBell size={s} /> },
     { id: "org", label: "Struktur", group: "Perusahaan", desc: "Hierarki tim", tint: "bg-coral-100 text-coral-600", icon: (s) => <IconBuilding size={s} /> },
     { id: "profil", label: "Profil", group: "Akun", desc: "Data diri & keamanan", tint: "bg-grape-100 text-grape-600", icon: (s) => <IconUsers size={s} /> },
   ],
   companyadmin: [
-    { id: "gaji", label: "Penggajian", group: "Operasional", desc: "Terbitkan slip bulanan", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconWallet size={s} /> },
+    { id: "kendali", label: "R. Kendali", group: "Operasional", desc: "Papan live gudang", tint: "bg-ink-900 text-sun-400", icon: (s) => <IconCpu size={s} /> },
+    { id: "pengumuman", label: "Pengumuman", group: "Info", desc: "Posting & pantau konfirmasi", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconBell size={s} /> },
     { id: "org", label: "Struktur", group: "Perusahaan", desc: "Susun hierarki", tint: "bg-coral-100 text-coral-600", icon: (s) => <IconBuilding size={s} /> },
-    { id: "aturan", label: "Aturan", group: "Perusahaan", desc: "Geofence, shift & libur", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconGear size={s} /> },
+    { id: "aturan", label: "Aturan", group: "Perusahaan", desc: "Geofence, shift & libur", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconGear size={s} /> },
   ],
   superadmin: [
-    { id: "gaji", label: "Penggajian", group: "Operasional", desc: "Terbitkan slip bulanan", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconWallet size={s} /> },
+    { id: "kendali", label: "R. Kendali", group: "Operasional", desc: "Papan live gudang", tint: "bg-ink-900 text-sun-400", icon: (s) => <IconCpu size={s} /> },
+    { id: "pengumuman", label: "Pengumuman", group: "Info", desc: "Posting & pantau konfirmasi", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconBell size={s} /> },
     { id: "org", label: "Struktur", group: "Perusahaan", desc: "Susun hierarki", tint: "bg-coral-100 text-coral-600", icon: (s) => <IconBuilding size={s} /> },
-    { id: "aturan", label: "Sistem", group: "Sistem", desc: "Branding & cadangan", tint: "bg-sky-100 text-sky-600", icon: (s) => <IconGear size={s} /> },
+    { id: "aturan", label: "Sistem", group: "Sistem", desc: "Branding & cadangan", tint: "bg-teal-100 text-teal-600", icon: (s) => <IconGear size={s} /> },
   ],
 };
 
 const HOME: Record<Role, ViewId> = {
   employee: "home", manager: "home", companyadmin: "dashboard", superadmin: "dashboard",
 };
+
+/**
+ * Responsive shell width. The app keeps its phone frame on small screens but
+ * widens on tablets/desktop so content never collides. Shared by the shell,
+ * dock and floating banners so they always align.
+ */
+const SHELL_W = "max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl";
 
 function geoTone(status?: string): "ok" | "warn" | "danger" | "ink" {
   if (status === "locked" || status === "sim") return "ok";
@@ -233,7 +246,7 @@ function SiteSwitcher() {
 }
 
 function Shell() {
-  const { session, company, leaves, payslips, org, audits, engine, geo, fence, tokenExp, logout } = useApp();
+  const { session, company, leaves, org, board, activeSite, audits, engine, geo, fence, tokenExp, logout } = useApp();
   const toast = useToast();
   const [view, setView] = useState<ViewId>("home");
   const [initialType, setInitialType] = useState<AttendanceType>("IN");
@@ -289,10 +302,10 @@ function Shell() {
   const badgeFor = (id: ViewId): string | null => {
     if (!session) return null;
     if (id === "org") return String(org.length);
-    if (id === "gaji") {
-      const n = role === "employee" || role === "manager"
-        ? payslips.filter((p) => p.staffId === session.staffId && p.status === "issued").length
-        : payslips.filter((p) => p.month === monthNow && p.status === "issued").length;
+    if (id === "pengumuman") {
+      const n = board.filter(
+        (p) => (p.siteId === null || p.siteId === activeSite.id) && !p.acks.includes(session.staffId),
+      ).length;
       return n > 0 ? String(n) : null;
     }
     if (id === "audit") return audits.length > 99 ? "99+" : String(audits.length);
@@ -340,6 +353,11 @@ function Shell() {
     return <FaceEnrollGate onDone={() => setFaceDone(true)} />;
   }
 
+  /* Ruang Kendali — full-bleed dark ops board (escapes the phone frame) */
+  if (view === "kendali") {
+    return <LiveOpsView onExit={() => nav(HOME[role])} />;
+  }
+
   /* maintenance mode — admins keep access */
   const isAdminRole = role === "superadmin" || role === "companyadmin";
   if (company.maintenance && !isAdminRole) {
@@ -366,7 +384,7 @@ function Shell() {
 
   return (
     <div className="app-bg min-h-dvh">
-      <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col">
+      <div className={`mx-auto flex min-h-dvh w-full ${SHELL_W} flex-col`}>
         <header className="pt-safe sticky top-0 z-30 border-b border-ink-100 bg-paper/90 backdrop-blur print:hidden">
           <div className="flex items-center gap-2.5 px-4 py-2.5">
             {company.logo ? (
@@ -378,20 +396,21 @@ function Shell() {
             )}
             <div className="min-w-0 flex-1">
               <p className="truncate font-display text-[14.5px] leading-tight font-extrabold text-ink-900">{company.appName ?? "Vittoria HR"}</p>
-              <p className="truncate text-[10px] font-bold text-ink-400">
-                {session.name} · {ROLE_LABEL[role]}
-                <span className="text-ink-300"> · sesi {fmtExpLeft(tokenExp)}</span>
+              <p className="flex min-w-0 items-center gap-1 text-[10px] font-bold text-ink-400">
+                <span className="truncate">{session.name} · {ROLE_LABEL[role]}</span>
+                <span className="hidden text-ink-300 md:inline">· sesi {fmtExpLeft(tokenExp)}</span>
               </p>
-            </div>
-            <div className="hidden items-center gap-1.5 sm:flex">
-              <Chip tone={engine === "ai" ? "teal" : engine === "lite" ? "warn" : "ink"}>
-                <IconCpu size={11} /> {engine === "ai" ? "AI" : engine === "lite" ? "LITE" : "…"}
-              </Chip>
+              {/* status line — engine + GPS live under the title, not crowding the right */}
+              <div className="mt-1 flex items-center gap-1.5">
+                <Chip tone={engine === "ai" ? "teal" : engine === "lite" ? "warn" : "ink"} className="!px-1.5 !py-0.5 !text-[8.5px]">
+                  <IconCpu size={9} /> {engine === "ai" ? "AI" : engine === "lite" ? "LITE" : "…"}
+                </Chip>
+                <Chip tone={geoTone(geo?.status)} className="!px-1.5 !py-0.5 !text-[8.5px]">
+                  <IconSignal size={9} /> {geoLabel(geo?.status, geo?.simulated)}
+                </Chip>
+              </div>
             </div>
             <SiteSwitcher />
-            <Chip tone={geoTone(geo?.status)}>
-              <IconSignal size={11} /> {geoLabel(geo?.status, geo?.simulated)}
-            </Chip>
             <NotifBell />
             <LogoutBtn />
           </div>
@@ -421,13 +440,14 @@ function Shell() {
             {view === "aturan" && <SettingsView />}
             {view === "audit" && <AuditView />}
             {view === "org" && <OrgView />}
+            {view === "pengumuman" && <PengumumanView />}
           </div>
         </main>
 
         {/* PWA install banner (yield to the geofence warning when both apply) */}
         {installEvt && !installGone && !(fence && !fence.inside && view !== "absen") && (
           <div className="fixed inset-x-0 bottom-24 z-30 flex justify-center px-4 print:hidden">
-            <div className="anim-fade-up flex w-full max-w-md items-center gap-3 rounded-2xl border border-ink-100 bg-white/95 p-3 shadow-[0_18px_48px_rgba(23,42,89,0.22)] backdrop-blur">
+            <div className={`anim-fade-up flex w-full ${SHELL_W} items-center gap-3 rounded-2xl border border-ink-100 bg-white/95 p-3 shadow-[0_18px_48px_rgba(23,42,89,0.22)] backdrop-blur`}>
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-sun-400 to-sun-600 text-white shadow-[0_8px_18px_rgba(240,115,0,0.4)]">
                 <IconGrid size={18} />
               </span>
@@ -444,7 +464,7 @@ function Shell() {
         )}
 
         <nav className="nav-safe fixed inset-x-0 bottom-0 z-40 print:hidden">
-          <div className="mx-auto w-full max-w-md px-4">
+          <div className={`mx-auto w-full ${SHELL_W} px-4`}>
             <div className="relative rounded-[26px] border border-ink-100 bg-white/95 shadow-[0_12px_40px_rgba(23,42,89,0.16)] backdrop-blur">
               <div className="grid grid-cols-5 items-end px-2 pt-2 pb-2">
                 <TabBtn t={dock[0]} active={view === dock[0].id} onClick={() => nav(dock[0].id)} />

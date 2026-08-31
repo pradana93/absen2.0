@@ -291,7 +291,7 @@ function save(key: string, value: unknown) {
 }
 
 export function clearAll() {
-  ["employees", "logs", "settings", "seeded", "company", "shifts", "leaves", "breaks", "audit", "notifs", "session", "payslips", "org", "sites", "sitechoice"].forEach((k) =>
+  ["employees", "logs", "settings", "seeded", "company", "shifts", "leaves", "breaks", "audit", "notifs", "session", "payslips", "org", "sites", "sitechoice", "board"].forEach((k) =>
     localStorage.removeItem(NS + k),
   );
 }
@@ -374,6 +374,13 @@ export const db = {
   savePayslips: (v: Payslip[]) => save("payslips", v),
   loadOrg: () => load<OrgNode[]>("org", []).map((n) => ({ ...n, siteId: n.siteId ?? "site-vit" })),
   saveOrg: (v: OrgNode[]) => save("org", v),
+  loadBoard: () => {
+    try {
+      if (localStorage.getItem(NS + "board") === null) return seedBoardPosts(); // self-seed once
+    } catch { /* private mode */ }
+    return load<BoardPost[]>("board", []);
+  },
+  saveBoard: (v: BoardPost[]) => save("board", v),
   loadSites: () => load<Site[]>("sites", []),
   saveSites: (v: Site[]) => save("sites", v),
   loadSiteChoice: () => load<string | null>("sitechoice", null),
@@ -606,6 +613,35 @@ export function seedOrgNodes(): OrgNode[] {
     { id: "org-bc-root", parentId: null, siteId: "site-bc", title: "Kepala Gudang", staffId: null, name: "Hasan Basri", note: "Pimpinan gudang Batu Ceper", createdAt: t + 4 },
     { id: "org-bc-drv", parentId: "org-bc-root", siteId: "site-bc", title: "Driver", staffId: "VTR-003", name: null, note: null, createdAt: t + 5 },
     { id: "org-bc-qc", parentId: "org-bc-root", siteId: "site-bc", title: "Inspector", staffId: "VTR-004", name: null, note: null, createdAt: t + 6 },
+  ];
+}
+
+/* ------------------------ papan pengumuman (board posts) ----------------- */
+export interface BoardPost {
+  id: string;
+  siteId: string | null; // null = semua area
+  title: string;
+  body: string;
+  tone: "info" | "warn" | "danger" | "ok";
+  createdBy: string;
+  createdAt: number;
+  acks: string[]; // staffIds yang sudah menekan "Mengerti"
+}
+
+export function seedBoardPosts(): BoardPost[] {
+  return [
+    {
+      id: "an-1", siteId: null, tone: "warn",
+      title: "Stock opname akhir bulan",
+      body: "Gudang akan stock opname hari Sabtu 08.00–12.00. Semua staf wajib hadir; absensi tetap menggunakan wajah + GPS seperti biasa.",
+      createdBy: "Maya Kirana", createdAt: Date.now() - 6 * 3600_000, acks: ["VTR-002"],
+    },
+    {
+      id: "an-2", siteId: "site-vit", tone: "info",
+      title: "APD baru sudah tersedia",
+      body: "Rompi & helm baru bisa diambil di ruang admin depan. Mohon tukarkan yang lama.",
+      createdBy: "Budi Hartono", createdAt: Date.now() - 26 * 3600_000, acks: ["VTR-001", "VTR-005"],
+    },
   ];
 }
 
