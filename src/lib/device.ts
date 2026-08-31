@@ -1,7 +1,4 @@
-/**
- * Device fingerprint — stable per browser profile. Powers the anti-fraud
- * device binding (one account ↔ one device, releasable by Super Admin).
- */
+/** Device fingerprint — stable per browser profile (anti-fraud binding). */
 let cache: string | null = null;
 
 export function getDeviceId(): string {
@@ -10,17 +7,13 @@ export function getDeviceId(): string {
     const stored = localStorage.getItem("vittoria:device");
     if (stored) { cache = stored; return stored; }
   } catch { /* fallthrough */ }
-
   const nav = navigator as Navigator & { deviceMemory?: number };
   const raw = [
-    navigator.userAgent,
-    navigator.language,
+    navigator.userAgent, navigator.language,
     screen.width, screen.height, screen.colorDepth,
     Intl.DateTimeFormat().resolvedOptions().timeZone,
-    nav.hardwareConcurrency ?? 0,
-    nav.deviceMemory ?? 0,
+    nav.hardwareConcurrency ?? 0, nav.deviceMemory ?? 0,
   ].join("|");
-
   let h1 = 0x811c9dc5, h2 = 0x01000193;
   for (let i = 0; i < raw.length; i++) {
     h1 = Math.imul(h1 ^ raw.charCodeAt(i), 16777619) >>> 0;

@@ -3,15 +3,8 @@ import { ReactNode, SVGProps } from "react";
 
 type P = SVGProps<SVGSVGElement> & { size?: number };
 
-const base = (
-  { size = 20, ...props }: P,
-  children: ReactNode,
-) => (
-  <svg
-    viewBox="0 0 24 24" width={size} height={size} fill="none"
-    stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-    aria-hidden="true" {...props}
-  >
+const base = ({ size = 20, ...props }: P, children: ReactNode) => (
+  <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
     {children}
   </svg>
 );
@@ -26,7 +19,7 @@ export const IconPin = (p: P) => base(p, <><path d="M12 21s-7-6.1-7-11a7 7 0 0 1
 export const IconCheck = (p: P) => base(p, <path d="m5 12.5 4.5 4.5L19 7.5" />);
 export const IconX = (p: P) => base(p, <path d="M6 6l12 12M18 6 6 18" />);
 export const IconAlert = (p: P) => base(p, <><path d="M12 3.5 2.5 20h19L12 3.5Z" /><path d="M12 10v4.5" /><circle cx="12" cy="17.3" r="0.4" fill="currentColor" /></>);
-export const IconInfo = (p: P) => base(p, <><circle cx="12" cy="12" r="9" /><path d="M12 11v5.5" /><circle cx="12" cy="7.8" r="0.4" fill="currentColor" /></>);
+export const IconInfo = (p: P) => base(p, <><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><circle cx="12" cy="8" r="0.4" fill="currentColor" /></>);
 export const IconSignal = (p: P) => base(p, <><path d="M4 18.5v-2" /><path d="M9 18.5v-5" /><path d="M14 18.5V9.5" /><path d="M19 18.5v-12" /></>);
 export const IconBell = (p: P) => base(p, <><path d="M6 9.5a6 6 0 0 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 13.5 6 9.5Z" /><path d="M10 18.5a2 2 0 0 0 4 0" /></>);
 export const IconSun = (p: P) => base(p, <><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5 5l1.4 1.4M17.6 17.6 19 19M19 5l-1.4 1.4M6.4 17.6 5 19" /></>);

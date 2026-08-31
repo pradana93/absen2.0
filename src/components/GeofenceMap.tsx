@@ -1,11 +1,6 @@
 /**
- * GeofenceMap — true map (Leaflet + OpenStreetMap) of the attendance area.
- *
- * View mode  : HQ pin, radius circle, check-in plots, live pulsing position.
- * Edit mode  : drag the HQ pin to place the area, drag the white handle on
- *              the circle edge to set the radius manually — every move
- *              reports a draft via onDraft; nothing is saved until the
- *              caller commits it.
+ * GeofenceMap — true map (Leaflet + OpenStreetMap).
+ * Edit mode: drag HQ pin + radius handle; reports drafts via onDraft.
  */
 import { useEffect, useRef } from "react";
 import L from "leaflet";
@@ -18,14 +13,8 @@ import { Chip } from "./bits";
 export interface GeoDraft { lat: number; lon: number; radiusM: number; }
 
 interface Props {
-  hq: GeoPoint;
-  radiusM: number;
-  points?: AttendanceLog[];
-  live?: GeoReading | null;
-  editable?: boolean;
-  onDraft?: (d: GeoDraft) => void;
-  heightClass?: string;
-  fitPoints?: boolean;
+  hq: GeoPoint; radiusM: number; points?: AttendanceLog[]; live?: GeoReading | null;
+  editable?: boolean; onDraft?: (d: GeoDraft) => void; heightClass?: string; fitPoints?: boolean;
 }
 
 const HQ_ICON = L.divIcon({ className: "", html: '<div class="hq-pin"></div>', iconSize: [22, 22], iconAnchor: [11, 11] });
@@ -34,28 +23,19 @@ const LIVE_ICON = L.divIcon({ className: "", html: '<div class="live-dot"></div>
 
 function dotIcon(status: "VERIFIED" | "REJECTED", inside: boolean): L.DivIcon {
   const color = status === "REJECTED" ? "#e5484d" : inside ? "#159a6d" : "#e0950f";
-  return L.divIcon({
-    className: "",
-    html: `<div class="map-dot" style="width:12px;height:12px;background:${color}"></div>`,
-    iconSize: [12, 12], iconAnchor: [6, 6],
-  });
+  return L.divIcon({ className: "", html: `<div class="map-dot" style="width:12px;height:12px;background:${color}"></div>`, iconSize: [12, 12], iconAnchor: [6, 6] });
 }
 
-export default function GeofenceMap({
-  hq, radiusM, points = [], live = null, editable = false, onDraft, heightClass = "h-[340px]", fitPoints = true,
-}: Props) {
+export default function GeofenceMap({ hq, radiusM, points = [], live = null, editable = false, onDraft, heightClass = "h-[340px]", fitPoints = true }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layersRef = useRef<L.LayerGroup | null>(null);
   const hqRef = useRef<L.Marker | null>(null);
   const handleRef = useRef<L.Marker | null>(null);
   const fitRef = useRef(true);
-  const hqLatest = useRef(hq);
   const radiusLatest = useRef(radiusM);
-  hqLatest.current = hq;
   radiusLatest.current = radiusM;
 
-  /* ------------------------------ map init ------------------------------ */
   useEffect(() => {
     const el = containerRef.current;
     if (!el || mapRef.current) return;
@@ -70,23 +50,17 @@ export default function GeofenceMap({
     const ro = new ResizeObserver(() => map.invalidateSize());
     ro.observe(el);
     return () => {
-      ro.disconnect();
-      map.remove();
-      mapRef.current = null;
-      layersRef.current = null;
-      hqRef.current = null;
-      handleRef.current = null;
+      ro.disconnect(); map.remove();
+      mapRef.current = null; layersRef.current = null; hqRef.current = null; handleRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ------------------------- editable pin + handle ----------------------- */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (hqRef.current) { hqRef.current.remove(); hqRef.current = null; }
     if (handleRef.current) { handleRef.current.remove(); handleRef.current = null; }
-
     if (!editable) return;
 
     const hqMarker = L.marker([hq.lat, hq.lon], { icon: HQ_ICON, draggable: true, zIndexOffset: 500 }).addTo(map);
@@ -106,20 +80,13 @@ export default function GeofenceMap({
       const p = hqMarker.getLatLng();
       const hp = handle.getLatLng();
       const dist = Math.round(haversineMeters({ lat: p.lat, lon: p.lng }, { lat: hp.lat, lon: hp.lng }));
-      const clamped = Math.min(1000, Math.max(20, dist));
-      onDraft?.({ lat: p.lat, lon: p.lng, radiusM: clamped });
+      onDraft?.({ lat: p.lat, lon: p.lng, radiusM: Math.min(1000, Math.max(20, dist)) });
     });
 
-    return () => {
-      hqMarker.remove();
-      handle.remove();
-      hqRef.current = null;
-      handleRef.current = null;
-    };
+    return () => { hqMarker.remove(); handle.remove(); hqRef.current = null; handleRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editable]);
 
-  /* keep the handle glued while radius changes from slider/fields */
   useEffect(() => {
     if (!editable || !hqRef.current || !handleRef.current) return;
     const p = hqRef.current.getLatLng();
@@ -127,34 +94,22 @@ export default function GeofenceMap({
     handleRef.current.setLatLng([hp.lat, hp.lon]);
   }, [radiusM, editable]);
 
-  /* ------------------------ circle + plots + live ------------------------ */
   useEffect(() => {
     const map = mapRef.current;
     const layers = layersRef.current;
     if (!map || !layers) return;
     layers.clearLayers();
-
-    L.circle([hq.lat, hq.lon], {
-      radius: radiusM,
-      color: "#159a6d", weight: 2, dashArray: "7 5",
-      fillColor: "#159a6d", fillOpacity: 0.1,
-    }).addTo(layers);
-
+    L.circle([hq.lat, hq.lon], { radius: radiusM, color: "#159a6d", weight: 2, dashArray: "7 5", fillColor: "#159a6d", fillOpacity: 0.1 }).addTo(layers);
     for (const p of points) {
       const inside = p.distanceM <= radiusM;
       L.marker([p.lat, p.lon], { icon: dotIcon(p.status, inside) })
-        .bindTooltip(
-          `<b>${p.name}</b> · ${p.type}${p.status === "REJECTED" ? " · DITOLAK" : ""}<br/>` +
-          `${wibShortDate(new Date(p.ts))} ${wibTime(new Date(p.ts))} · ${formatMeters(p.distanceM)}`,
-        )
+        .bindTooltip(`<b>${p.name}</b> · ${p.type}${p.status === "REJECTED" ? " · DITOLAK" : ""}<br/>${wibShortDate(new Date(p.ts))} ${wibTime(new Date(p.ts))} · ${formatMeters(p.distanceM)}`)
         .addTo(layers);
     }
-
     if (live && (live.status === "locked" || live.status === "sim")) {
       L.circle([live.lat, live.lon], { radius: live.accuracy, color: "#2b9fe0", weight: 1, fillColor: "#2b9fe0", fillOpacity: 0.08 }).addTo(layers);
       L.marker([live.lat, live.lon], { icon: LIVE_ICON, zIndexOffset: 400 }).addTo(layers);
     }
-
     if (fitRef.current) {
       fitRef.current = false;
       const pts: L.LatLngExpression[] = [[hq.lat, hq.lon]];

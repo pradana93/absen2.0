@@ -1,7 +1,4 @@
-/**
- * Cuti — leave balances, request form with attachment, two-stage workflow
- * (Manajer → HR) with SLA chips and batch approvals, personal history.
- */
+/** Cuti — balances, request form + attachment, Manajer → HR workflow, SLA, batch approve. */
 import { useMemo, useRef, useState } from "react";
 import { useApp } from "../lib/store";
 import { LEAVE_TYPES, LeaveRequest, LeaveType, leaveUsed } from "../lib/database";
@@ -51,11 +48,7 @@ export default function CutiView() {
     if (!lvReason.trim()) return setLvErr("Isi alasan pengajuan terlebih dahulu.");
     if (lvDays < 1 || lvDays > 10) return setLvErr("Durasi 1–10 hari per pengajuan.");
     if (lvType !== "Melahirkan" && lvDays > remaining(lvType)) return setLvErr(`Sisa ${lvType.toLowerCase()} Anda ${remaining(lvType)} hari.`);
-    addLeave({
-      id: uid("lv"), staffId: me.staffId, name: me.name, type: lvType, date: lvDate,
-      days: lvDays, reason: lvReason.trim(), attachment: lvFile, status: "pending",
-      managerDecision: null, hrDecision: null, createdAt: Date.now(),
-    });
+    addLeave({ id: uid("lv"), staffId: me.staffId, name: me.name, type: lvType, date: lvDate, days: lvDays, reason: lvReason.trim(), attachment: lvFile, status: "pending", managerDecision: null, hrDecision: null, createdAt: Date.now() });
     audit("LEAVE_REQUEST", me.staffId, `${lvType} · ${lvDays} hari · ${lvDate}`);
     toast.push("ok", "Pengajuan cuti terkirim", `${lvType} · ${lvDays} hari — menunggu Manajer.`);
     setFormOpen(false);
@@ -80,45 +73,28 @@ export default function CutiView() {
           {lv.attachment && <Chip tone="ink" className="!px-1.5 !py-0.5 !text-[9.5px]"><IconDoc size={9} /> LAMPIRAN</Chip>}
           <SlaChip createdAt={lv.createdAt} />
         </p>
-        <p className="mt-0.5 text-[11.5px] font-semibold text-ink-400">
-          {lv.days} hari · {wibShortDate(new Date(lv.date + "T00:00:00"))} · “{lv.reason}”
-        </p>
-        {stage === "hr" && lv.managerDecision && (
-          <p className="mt-0.5 text-[10.5px] font-bold text-sky-600">✓ Disetujui Manajer: {lv.managerDecision.by}</p>
-        )}
+        <p className="mt-0.5 text-[11.5px] font-semibold text-ink-400">{lv.days} hari · {wibShortDate(new Date(lv.date + "T00:00:00"))} · “{lv.reason}”</p>
+        {stage === "hr" && lv.managerDecision && <p className="mt-0.5 text-[10.5px] font-bold text-sky-600">✓ Disetujui Manajer: {lv.managerDecision.by}</p>}
       </div>
       <div className="flex shrink-0 gap-1.5 pt-0.5">
-        <button
-          onClick={() => { decideLeave(lv.id, true, stage); toast.push("ok", "Pengajuan disetujui", `${lv.name} · ${lv.type} ${lv.days} hari${stage === "manager" ? " → lanjut ke HR" : ""}`); }}
-          className="grid h-9 w-9 cursor-pointer place-items-center rounded-xl bg-ok-100 text-ok-600 transition hover:bg-ok-500 hover:text-white active:scale-90" aria-label="Setujui"
-        >
-          <IconCheck size={16} />
-        </button>
-        <button
-          onClick={() => { decideLeave(lv.id, false, stage); toast.push("danger", "Pengajuan ditolak", `${lv.name} · ${lv.type} ${lv.days} hari`); }}
-          className="grid h-9 w-9 cursor-pointer place-items-center rounded-xl bg-danger-100 text-danger-600 transition hover:bg-danger-500 hover:text-white active:scale-90" aria-label="Tolak"
-        >
-          <IconX size={16} />
-        </button>
+        <button onClick={() => { decideLeave(lv.id, true, stage); toast.push("ok", "Pengajuan disetujui", `${lv.name} · ${lv.type} ${lv.days} hari${stage === "manager" ? " → lanjut ke HR" : ""}`); }}
+          className="grid h-9 w-9 cursor-pointer place-items-center rounded-xl bg-ok-100 text-ok-600 transition hover:bg-ok-500 hover:text-white active:scale-90" aria-label="Setujui"><IconCheck size={16} /></button>
+        <button onClick={() => { decideLeave(lv.id, false, stage); toast.push("danger", "Pengajuan ditolak", `${lv.name} · ${lv.type} ${lv.days} hari`); }}
+          className="grid h-9 w-9 cursor-pointer place-items-center rounded-xl bg-danger-100 text-danger-600 transition hover:bg-danger-500 hover:text-white active:scale-90" aria-label="Tolak"><IconX size={16} /></button>
       </div>
     </div>
   );
 
   const batchBtn = (queue: LeaveRequest[], stage: "manager" | "hr") =>
     queue.length > 1 && (
-      <button
-        className="btn-sun !rounded-lg !px-2.5 !py-1.5 !text-[11px]"
-        onClick={() => {
-          queue.forEach((lv) => decideLeave(lv.id, true, stage));
-          toast.push("ok", "Semua disetujui", `${queue.length} pengajuan ${stage === "manager" ? "diteruskan ke HR" : "final"}.`);
-        }}
-      >
+      <button className="btn-sun !rounded-lg !px-2.5 !py-1.5 !text-[11px]"
+        onClick={() => { queue.forEach((lv) => decideLeave(lv.id, true, stage)); toast.push("ok", "Semua disetujui", `${queue.length} pengajuan ${stage === "manager" ? "diteruskan ke HR" : "final"}.`); }}>
         Setujui Semua
       </button>
     );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 pb-2">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="font-display text-[26px] leading-tight font-extrabold text-ink-900">Cuti</h1>
@@ -129,7 +105,6 @@ export default function CutiView() {
         </button>
       </div>
 
-      {/* balances */}
       <div className="grid grid-cols-2 gap-2.5">
         {LEAVE_TYPES.map((t) => (
           <div key={t} className="card card-press p-3.5">
@@ -144,7 +119,6 @@ export default function CutiView() {
         ))}
       </div>
 
-      {/* form */}
       {formOpen && (
         <div className="card anim-fade-up space-y-3.5 p-4">
           <SectionLabel>Form Pengajuan</SectionLabel>
@@ -168,7 +142,7 @@ export default function CutiView() {
             <input className="input !py-2.5 text-sm" placeholder="cth. Acara keluarga di luar kota" value={lvReason} onChange={(e) => setLvReason(e.target.value)} />
           </div>
           <div>
-            <label className="label">Lampiran (opsional — surat dokter, dsb.)</label>
+            <label className="label">Lampiran (opsional)</label>
             <input ref={fileRef} type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
             {lvFile ? (
               <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2.5">
@@ -185,35 +159,26 @@ export default function CutiView() {
         </div>
       )}
 
-      {/* manager queue */}
       {isManager && (
         <section>
           <SectionLabel right={<div className="flex items-center gap-1.5">{batchBtn(mgrQueue, "manager")}<Chip tone={mgrQueue.length ? "warn" : "ok"}>{mgrQueue.length} antre</Chip></div>}>
             Persetujuan Manajer (Tahap 1)
           </SectionLabel>
-          {mgrQueue.length === 0 ? (
-            <p className="card px-4 py-5 text-center text-[13px] font-semibold text-ink-400">Tidak ada pengajuan menunggu.</p>
-          ) : (
-            <div className="space-y-2.5">{mgrQueue.map((lv) => <QueueCard key={lv.id} lv={lv} stage="manager" />)}</div>
-          )}
+          {mgrQueue.length === 0 ? <p className="card px-4 py-5 text-center text-[13px] font-semibold text-ink-400">Tidak ada pengajuan menunggu.</p>
+            : <div className="space-y-2.5">{mgrQueue.map((lv) => <QueueCard key={lv.id} lv={lv} stage="manager" />)}</div>}
         </section>
       )}
 
-      {/* HR queue */}
       {isHR && (
         <section>
           <SectionLabel right={<div className="flex items-center gap-1.5">{batchBtn(hrQueue, "hr")}<Chip tone={hrQueue.length ? "warn" : "ok"}>{hrQueue.length} antre</Chip></div>}>
             Persetujuan HR (Tahap 2)
           </SectionLabel>
-          {hrQueue.length === 0 ? (
-            <p className="card px-4 py-5 text-center text-[13px] font-semibold text-ink-400">Tidak ada pengajuan menunggu.</p>
-          ) : (
-            <div className="space-y-2.5">{hrQueue.map((lv) => <QueueCard key={lv.id} lv={lv} stage="hr" />)}</div>
-          )}
+          {hrQueue.length === 0 ? <p className="card px-4 py-5 text-center text-[13px] font-semibold text-ink-400">Tidak ada pengajuan menunggu.</p>
+            : <div className="space-y-2.5">{hrQueue.map((lv) => <QueueCard key={lv.id} lv={lv} stage="hr" />)}</div>}
         </section>
       )}
 
-      {/* history */}
       <section className="pb-2">
         <SectionLabel right={<Chip tone="ink">{(isHR || isManager ? allRequests : myLeaves).length} pengajuan</Chip>}>
           {isHR || isManager ? "Semua Pengajuan" : "Pengajuan Saya"}
@@ -224,9 +189,7 @@ export default function CutiView() {
           <div className="card divide-y divide-ink-100/80">
             {(isHR || isManager ? allRequests : myLeaves).map((lv, i) => (
               <div key={lv.id} className="tile-pop flex items-center gap-3 px-3.5 py-3" style={{ animationDelay: `${i * 40}ms` }}>
-                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
-                  lv.status === "approved" ? "bg-ok-100 text-ok-600" : lv.status === "rejected" ? "bg-danger-100 text-danger-600" : "bg-sky-100 text-sky-600"
-                }`}>
+                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${lv.status === "approved" ? "bg-ok-100 text-ok-600" : lv.status === "rejected" ? "bg-danger-100 text-danger-600" : "bg-sky-100 text-sky-600"}`}>
                   {lv.status === "approved" ? <IconCheck size={17} /> : lv.status === "rejected" ? <IconX size={17} /> : <IconBriefcase size={17} />}
                 </span>
                 <div className="min-w-0 flex-1">
@@ -237,9 +200,7 @@ export default function CutiView() {
                       {lv.status === "pending" ? "MENUNGGU MGR" : lv.status === "pending_hr" ? "MENUNGGU HR" : lv.status === "approved" ? "DISETUJUI" : "DITOLAK"}
                     </Chip>
                   </p>
-                  <p className="truncate text-[11px] font-semibold text-ink-400">
-                    {lv.days} hari · {wibShortDate(new Date(lv.date + "T00:00:00"))} · “{lv.reason}”
-                  </p>
+                  <p className="truncate text-[11px] font-semibold text-ink-400">{lv.days} hari · {wibShortDate(new Date(lv.date + "T00:00:00"))} · “{lv.reason}”</p>
                 </div>
               </div>
             ))}

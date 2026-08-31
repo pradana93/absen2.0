@@ -1,32 +1,26 @@
-# Vittoria HR — Netlify configuration (zero-config deploy)
-# Netlify reads this file automatically from the repo root.
-
+# Netlify picks these up automatically on import — no dashboard config needed.
 [build]
   command = "npm run build"
   publish = "dist"
-
-[functions]
-  directory = "netlify/functions"
-  node_bundler = "esbuild"
+  functions = "netlify/functions"
 
 [build.environment]
   NODE_VERSION = "20"
 
-# SPA: every route falls back to index.html (prevents 404/blank on refresh)
+# SPA: any route serves the app shell (prevents 404/blank on refresh)
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
-# Security headers for the HR app
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 [[headers]]
   for = "/*"
   [headers.values]
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-
-[[headers]]
-  for = "/assets/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"

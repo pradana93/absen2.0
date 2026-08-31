@@ -1,199 +1,77 @@
-# Menjalankan & Hosting Vittoria HR — Tanpa Preview Sandbox
+# Run & Deploy Guide — Vittoria HR
 
-Panduan ini menjawab dua hal: **(1)** menjalankan app dari laptop Anda sendiri, dan **(2)** hosting gratis yang terhubung ke GitHub — jadi kalau sandbox preview ter-wipe, app Anda tetap hidup di URL Anda sendiri.
+The app is 100% static output + one optional serverless function, so you own it completely: run it from your laptop, deploy straight from GitHub, and the preview sandbox can never lock you out.
 
 ---
 
-## 1. Jalankan di Laptop Sendiri (selamanya, offline-capable)
+## 1. Run on your own machine (no preview, no cloud)
 
-### Prasyarat
-- **Node.js 18+** → https://nodejs.org (pilih LTS). Cek: `node -v`
-- **Git** → https://git-scm.com
-
-### Langkah
 ```bash
-# 1. ambil kode dari GitHub Anda
 git clone https://github.com/USERNAME/vittoria-hr.git
 cd vittoria-hr
-
-# 2. pasang dependensi (sekali saja)
 npm install
-
-# 3. mode development (hot reload)
 npm run dev
-# → buka http://localhost:5173
-
-# 4. build produksi
-npm run build        # hasil di folder dist/
-npm run preview      # coba hasil build di http://localhost:4173
 ```
 
-> **Catatan data:** data tersimpan di `localStorage` browser per origin. `localhost:5173` dan URL hosting adalah "dunia" yang berbeda — pindahkan tenant via **Master Data → Impor/Ekspor JSON**.
+Open **http://localhost:5173** — done. Camera & GPS work on `localhost` (it's a trusted origin).
+
+- `npm run build` → production files in `dist/`
+- `npm run preview` → serve the production build locally to test exactly what users get
+
+## 2. Deploy to Netlify straight from GitHub (recommended)
+
+The repo ships **`netlify.toml`** with the build command, publish dir, SPA redirects, Node version, and functions path — so Netlify configures itself:
+
+1. Push this repo to GitHub
+2. https://app.netlify.com → **Add new site → Import an existing project** → pick the repo
+3. Verify it detected `npm run build` / `dist` (it will, from the toml) → **Deploy**
+4. Live at `https://<name>.netlify.app` in ~2 minutes; **every `git push` redeploys automatically**
+
+Rename the site under *Site configuration → Change site name* (e.g. `vittoria-hr.netlify.app`).
+
+### If the page is ever blank on Netlify
+
+Almost always the publish directory. Check *Site configuration → Build & deploy*:
+- Build command must be `npm run build`
+- Publish directory must be **`dist`** (never `/`, `public`, or `build`)
+- Then **Clear cache and deploy site**, and hard-refresh (Cmd/Ctrl+Shift+R)
+
+DevTools → Network telling you `main.tsx` 404s = publish dir is wrong (source files got served instead of the build).
+
+## 3. Deploy on GitHub Pages only (no other service)
+
+1. Push to GitHub → repo **Settings → Pages → Source: “GitHub Actions”**
+2. The workflow in `.github/workflows/deploy-pages.yml` builds with `--base=./` on every push to `main`
+3. Live at `https://USERNAME.github.io/REPO/`
+
+## 4. Gmail SMTP — real password-reset emails
+
+Browsers can't speak SMTP, so sending happens in **`netlify/functions/send-mail.mjs`** (free, deployed with the site).
+
+1. Dedicated Gmail (e.g. `absensi.vittoria@gmail.com`) → enable **2-Step Verification**
+2. Google Account → Security → **App passwords** → generate a 16-char password (normal Gmail passwords are rejected since 2022)
+3. As Super Admin → **Master Data → Email & SMTP** → fill in → **Kirim Tes** → **Simpan**
+4. *(Best practice)* Copy the env vars into Netlify (*Site settings → Environment variables*): `SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USER SMTP_PASS SMTP_FROM_NAME` — the function prefers env over in-app config, so credentials don't sit in device storage
+
+If the function is unreachable or SMTP is off, the app falls back to the in-app simulated inbox and says so — nobody gets locked out. Local dev note: `npm run dev` doesn't run Netlify Functions; use `netlify login && netlify link && netlify dev` to test email locally.
+
+## 5. The database, backups, moving devices
+
+- Data lives in your browser: **IndexedDB** (a real `vittoria.sqlite` file) + localStorage hot-cache, per origin.
+- **Backup:** Super Admin → Master Data → **Ekspor .sqlite** (genuine database file) and/or **Ekspor Semua (JSON)**.
+- **Move to another device/browser/URL:** import the JSON via Master Data → Impor on the new origin; attendance history can travel as CSV.
+- Open the `.sqlite` in *DB Browser for SQLite* or `sqlite3 vittoria.sqlite` — all 17 tables are there.
+
+## 6. If the sandbox preview wipes again
+
+The sandbox can reset; **your GitHub repo cannot**. Recovery is always:
+
+```bash
+git clone … && npm install && npm run dev
+```
+
+…and your Netlify URL never went down in the first place. Export a Master Data JSON whenever you make tenant changes you care about.
 
 ---
 
-## 2. Hosting Gratis dari GitHub (PaaS-like, tanpa server)
-
-App ini hasil build-nya **static files** (HTML/JS/CSS), jadi bisa di-host gratis dengan pola *connect repo → auto build → dapat URL*. Persis seperti PythonAnywhere, tapi untuk static app:
-
-### 🥇 Rekomendasi: Netlify / Cloudflare Pages / Vercel
-
-| | Netlify | Cloudflare Pages | Vercel |
-|---|---|---|---|
-| Gratis | ✅ 100 GB/bulan | ✅ bandwidth unlimited | ✅ 100 GB/bulan |
-| Auto-deploy dari GitHub | ✅ | ✅ | ✅ |
-| HTTPS otomatis (wajib kamera & GPS!) | ✅ | ✅ | ✅ |
-| URL gratis | `nama-app.netlify.app` | `nama-app.pages.dev` | `nama-app.vercel.app` |
-| Custom domain gratis | ✅ | ✅ | ✅ |
-
-## 📘 Full Tutorial: Deploy to Netlify from GitHub
-
-> The repo already ships `netlify.toml`, `public/_redirects`, and `.nvmrc` —
-> Netlify auto-detects the build command, publish directory, SPA routing, and
-> Node version from these files. **You should not have to type any settings.**
-
-### Phase 0 — Prerequisites
-
-- A GitHub account with your repository pushed to it
-- A Netlify account (free): sign up at https://app.netlify.com/signup (use "Sign up with GitHub")
-
-### Phase 1 — Put the code on GitHub (skip if done)
-
-```bash
-git init
-git add -A
-git commit -m "Vittoria HR app"
-git branch -M main
-git remote add origin https://github.com/USERNAME/vittoria-hr.git
-git push -u origin main
-```
-
-### Phase 2 — Connect Netlify to the repo
-
-1. Open https://app.netlify.com → **Add new site** → **Import an existing project**
-2. Choose **GitHub** → authorize if asked → pick your repository
-3. On the "Deploy settings" screen you should see (auto-read from `netlify.toml`):
-   - **Build command:** `npm run build`
-   - **Publish directory:** `dist`
-   - If the fields are empty, type exactly those two values. **Never** set the publish directory to `/`, `build`, or `public` — that serves the source files and produces a blank page.
-4. Click **Deploy vittoria-hr**
-5. Wait ~1–2 minutes. The log must end with `✓ built in ...s` (Vite's success line). If it does, your site is live at `https://<random-name>.netlify.app`
-
-### Phase 3 — Verify it actually works
-
-Open your new URL and check, in order:
-
-- [ ] The login screen renders (logo, WIB clock, Gudang picker) — **not a blank page**
-- [ ] Open DevTools (F12) → Console: no red errors; Network tab: `main.tsx` must **not** appear as a 404 (if it does, Phase 2 step 3 was wrong)
-- [ ] Log in as Super Admin (`wh.leader.vt@gmail.com` / `super123`)
-- [ ] Open the Absen tab and allow camera + location — both require the HTTPS that Netlify provides automatically
-
-### Phase 4 — Bring your company data along
-
-The Netlify URL is a **new origin**, so its `localStorage` starts empty (the app re-seeds demo data). To carry your real setup over:
-
-1. In the old environment (sandbox/preview): log in as Super Admin → **Master Data** → **Ekspor Semua (JSON)**
-2. On the Netlify URL: Super Admin → **Master Data → Impor** → pick the JSON file → apply
-3. Your tenants, gudangs, employees, shifts, quotas, and salary defaults arrive intact. (Attendance history can be exported/imported as CSV for the records.)
-
-### Phase 5 — Make it yours (optional)
-
-- **Rename the site:** Site configuration → **Change site name** → e.g. `vittoria-hr.netlify.app`
-- **Custom domain:** Domain management → **Add a domain** → follow the DNS steps; HTTPS renews automatically
-- **Every future deploy is automatic:** `git push` → Netlify rebuilds → live in ~90 s. Watch it in the **Deploys** tab.
-
-### Troubleshooting
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| **Blank white page** | Publish directory wrong → source `index.html` served, `/src/main.tsx` 404s | Set publish dir to `dist` (Site configuration → Build & deploy), redeploy |
-| Blank page, console shows a JS error | Stale browser cache/SW after a redeploy | Hard refresh (Ctrl/Cmd+Shift+R); unregister the service worker in DevTools → Application |
-| 404 / blank on refresh | SPA redirect missing | Already fixed by `netlify.toml` + `public/_redirects` in this repo — redeploy |
-| Build fails: `vite: not found` or engine errors | Node version too old | Already pinned to Node 20 via `netlify.toml` + `.nvmrc` — redeploy |
-| Camera says "not allowed" | Browser permission or non-HTTPS context | Grant camera permission for the site; confirm the URL starts with `https://` |
-| GPS stuck on "mencari…" | Location permission denied, or desktop without GPS | Allow location; or enable **Simulasi GPS** in Sistem for demos |
-| Deploy log fails at `npm install` | Lockfile conflict | In Netlify: Site configuration → Build → clear cache and redeploy |
-| "Powered by Netlify" badge near the dock | Free-plan branding overlay (can't be hidden — Netlify ToS) | Already handled: the dock auto-lifts above it (`--dock-lift` in `src/index.css`). To remove the badge entirely, upgrade to the Pro plan |
-
-Cloudflare Pages & Vercel: alurnya identik (import repo → framework preset "Vite" → deploy; `netlify.toml` diabaikan — set build `npm run build`, output `dist` di UI mereka).
-
-### 🥈 GitHub Pages (jika ingin tetap 100% di GitHub)
-
-GitHub Pages melayani dari *subpath* (`username.github.io/nama-repo/`), jadi asset path harus relatif. Tanpa menyentuh config, pakai override CLI:
-
-```bash
-npm run build -- --base=./
-```
-
-Lalu deploy folder `dist`:
-
-**Opsi A — repo pengguna (`username.github.io`):** paling gampang, app tampil di root.
-```bash
-git clone https://github.com/USERNAME/USERNAME.github.io.git
-npm run build
-cp -r dist/* USERNAME.github.io/
-cd USERNAME.github.io && git add -A && git commit -m "deploy" && git push
-# → https://USERNAME.github.io
-```
-
-**Opsi B — GitHub Actions (sudah termasuk di repo ini):**
-Workflow siap pakai sudah ter-commit di `.github/workflows/deploy-pages.yml` — tidak perlu membuat apa pun. Cukup:
-
-1. Aktifkan sekali di GitHub UI: **Settings → Pages → Build and deployment → Source: "GitHub Actions"**
-2. Push ke `main` → tab **Actions** memperlihatkan build berjalan → selesai
-
-URL live: `https://USERNAME.github.io/NAMA-REPO/` — dan setiap push berikutnya otomatis deploy ulang.
-
----
-
-## 3. Checklist Sebelum Go-Live ke Tim Gudang
-
-- [ ] **HTTPS aktif** (otomatis di semua platform di atas) — kamera & GPS menolak jalan di `http://`
-- [ ] Buka URL di HP karyawan → izinkan **kamera** & **lokasi**
-- [ ] HP Android: buka URL → menu browser → **"Tambahkan ke layar utama"** (app terpasang seperti aplikasi asli)
-- [ ] Login sebagai Super Admin → **Master Data** → ekspor JSON sebagai cadangan pertama
-- [ ] Atur radius geofence per gudang via peta (Aturan)
-- [ ] Buat akun karyawan via Pengguna → serahkan email + kata sandi awal → karyawan ambil foto tanda tangan saat login pertama
-
-## 4. Kalau Preview Sandbox Ter-Wipe Lagi
-
-Tenang — yang ter-wipe hanya *sandbox*, bukan repo GitHub Anda:
-1. `git clone` ulang → `npm install` → `npm run dev` (app kembali utuh)
-2. Data tenant: impor ulang JSON dari **Master Data** (atau dari URL hosting yang tetap hidup)
-
-Selama kode sudah di-push ke GitHub dan (opsional) di-deploy ke Netlify/Cloudflare/Vercel, app ini milik Anda sepenuhnya — tidak bergantung pada preview mana pun.
-
----
-
-## 5. Email Sungguhan via Gmail SMTP (Reset Kata Sandi)
-
-Arsitektur: browser **tidak bisa** mengirim SMTP langsung. Repo ini menyertakan
-`netlify/functions/send-mail.mjs` — serverless function gratis dari Netlify yang
-mengirim email dengan `nodemailer`. Saat di-deploy ke Netlify, function ikut
-ter-deploy otomatis dan URL `/.netlify/functions/send-mail` langsung hidup.
-
-### Langkah
-
-1. **Buat Gmail khusus absensi** (mis. `absensi.vittoria@gmail.com`).
-2. Aktifkan **2-Step Verification** → Google Account → Security.
-3. Buat **App Password** (Security → App passwords → Mail → Other “Vittoria HR”) — dapat 16 karakter. Sandi Gmail biasa *ditolak* server sejak 2022.
-4. Login sebagai **Super Admin → Master Data → Email & SMTP**:
-   - Nyalakan toggle, isi server `smtp.gmail.com`, port `465` (SSL), akun Gmail, dan App Password
-   - Klik **Kirim Tes** — jika sampai, konfigurasi benar 🎉
-   - **Simpan Konfigurasi**
-5. **(Direkomendasikan)** Klik **Salin Env Vars** → tempel di Netlify:
-   *Site settings → Environment variables* → redeploy. Function membaca env vars
-   lebih dulu, sehingga kredensial tidak perlu tersimpan di browser/perangkat.
-
-### Perilaku
-
-| Kondisi | Hasil |
-|---|---|
-| SMTP aktif + function ter-deploy | Email reset **sungguhan** tiba di inbox karyawan (cek Spam) |
-| SMTP aktif tapi function gagal | Otomatis fallback ke inbox simulasi + tercatat di audit |
-| SMTP nonaktif | Inbox simulasi di layar login (untuk demo/dev) |
-
-Setiap pengiriman tercatat di audit (`AUTH_PW_RESET_SENT`, `SMTP_TEST_OK/FAIL`).
-
-> Catatan dev lokal: `npm run dev` tidak menjalankan Netlify Function — gunakan
-> `netlify login && netlify link && netlify dev` bila ingin menguji email di lokal.
+**Production path (Fase 2):** hosted Postgres (Neon/Netlify DB) using `server/schema.postgres.sql` — same tables, data-only migration from the exported `.sqlite`, and the UI switches from local write-through to API calls without a rewrite.

@@ -1,264 +1,129 @@
 /**
- * Data layer — schema, migrations, seeds, payroll engine, brand presets,
- * tenant identity codec, and CSV helpers. Web equivalent of database.py
- * (SQLite attendance.db). Storage is localStorage under the "vittoria:" ns.
+ * database.ts — data access layer.
+ * Fase 1: localStorage is the synchronous hot-cache; every write is mirrored
+ * transactionally into embedded SQLite (lib/sql) which is the durable engine
+ * (persisted to IndexedDB). Fase 2: the same collections map onto Postgres.
  */
 import { uid, wibDayKey } from "./format";
 
-/* ------------------------------ constants ------------------------------- */
-export const DEFAULT_HQ = { lat: -6.1754, lon: 106.8272 }; // Gudang Pusat
-export const EMAIL_DOMAIN = "vittoria.co.id";
-export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-export const DEPARTMENTS = ["Gudang"];
+/* SQL engine + bridge load lazily so the ~1 MB WASM never delays first paint.
+   Module refs are cached once the store's boot effect resolves them. */
+let bridgeMod: typeof import("./sql/bridge") | null = null;
+let engineMod: typeof import("./sql/engine") | null = null;
+const bridge = () => import("./sql/bridge").then((m) => { bridgeMod = m; return m; });
+const engine = () => import("./sql/engine").then((m) => { engineMod = m; return m; });
 
-export type Role = "superadmin" | "companyadmin" | "manager" | "employee";
-export const ROLE_LABEL: Record<Role, string> = {
-  superadmin: "Super Admin",
-  companyadmin: "Admin HR",
-  manager: "Manajer",
-  employee: "Karyawan",
-};
-
+/* --------------------------------- types -------------------------------- */
+export type Role = "employee" | "manager" | "companyadmin" | "superadmin";
 export type EmpStatus = "active" | "inactive" | "resigned";
-export const STATUS_LABEL: Record<EmpStatus, string> = {
-  active: "Aktif", inactive: "Nonaktif", resigned: "Resign",
-};
-
 export type AttendanceType = "IN" | "OUT";
-
-/* ------------------------------- tables --------------------------------- */
-export interface SalaryStructure {
-  basic: number;      // gaji pokok / bulan
-  transport: number;  // per hari hadir
-  meal: number;       // per hari hadir
-  otPerHour: number;  // upah lembur / jam
-}
-
-export const SEED_SALARY: Record<Role, SalaryStructure> = {
-  superadmin: { basic: 18_000_000, transport: 25_000, meal: 20_000, otPerHour: 90_000 },
-  companyadmin: { basic: 9_500_000, transport: 25_000, meal: 20_000, otPerHour: 50_000 },
-  manager: { basic: 8_000_000, transport: 20_000, meal: 15_000, otPerHour: 45_000 },
-  employee: { basic: 5_200_000, transport: 20_000, meal: 15_000, otPerHour: 30_000 },
-};
-
-/* ------------------------- sites (Gudang / Area) ------------------------ */
+export type LeaveType = "Tahunan" | "Sakit" | "Darurat" | "Melahirkan";
+export type LeaveStatus = "pending" | "pending_hr" | "approved" | "rejected";
 export type SiteColor = "sun" | "sky" | "teal" | "grape" | "coral";
 
-export interface Site {
-  id: string;
-  name: string;        // "Gudang Pusat Jakarta"
-  shortName: string;   // "Jakarta"
-  address: string;
-  hqLat: number;       // geofence_locations — each site owns its fence
-  hqLon: number;
-  radiusM: number;
-  color: SiteColor;
-}
-
-/** Literal class map so Tailwind JIT keeps them. */
-export const SITE_STYLE: Record<SiteColor, { chip: string; dot: string; ring: string; grad: string }> = {
-  sun:   { chip: "bg-sun-100 text-sun-700",     dot: "bg-sun-500",   ring: "ring-sun-400",   grad: "from-sun-400 to-sun-600" },
-  sky:   { chip: "bg-sky-100 text-sky-600",     dot: "bg-sky-500",   ring: "ring-sky-400",   grad: "from-sky-300 to-sky-600" },
-  teal:  { chip: "bg-teal-100 text-teal-600",   dot: "bg-teal-500",  ring: "ring-teal-400",  grad: "from-teal-300 to-teal-600" },
-  grape: { chip: "bg-grape-100 text-grape-600", dot: "bg-grape-500", ring: "ring-grape-400", grad: "from-grape-300 to-grape-600" },
-  coral: { chip: "bg-coral-100 text-coral-600", dot: "bg-coral-500", ring: "ring-coral-400", grad: "from-coral-300 to-coral-600" },
-};
-
-export function seedSites(): Site[] {
-  return [
-    { id: "site-vit", name: "Gudang Vittoria", shortName: "Vittoria", address: "Jl. Gatot Subroto Kav. 21, Jakarta Pusat", hqLat: -6.1754, hqLon: 106.8272, radiusM: 100, color: "sun" },
-    { id: "site-bc", name: "Gudang Batu Ceper", shortName: "Batu Ceper", address: "Jl. Pembangunan III, Batu Ceper, Tangerang", hqLat: -6.1668, hqLon: 106.6315, radiusM: 120, color: "sky" },
-  ];
-}
+export interface SalaryStructure { basic: number; transport: number; meal: number; otPerHour: number; }
 
 export interface Employee {
-  staffId: string;
-  nik: string;
-  name: string;
-  email: string;
-  password: string; // demo — hash server-side in production
-  phone: string;
-  address: string;
-  emergencyName: string;
-  emergencyPhone: string;
-  department: string;
-  position: string;
-  role: Role;
-  shiftId: string;
-  status: EmpStatus;
-  salary: SalaryStructure;
-  siteId: string | null; // null = Kantor Pusat / semua area (Super Admin & HR)
-  photo: string | null;
-  descriptor: number[] | null; // 128-D face encoding
-  hash: string | null;         // lite-mode dHash
-  deviceId: string | null;
-  deviceBoundAt: number | null;
-  createdAt: number;
+  staffId: string; nik: string; name: string; email: string; password: string;
+  phone: string; address: string; emergencyName: string; emergencyPhone: string;
+  department: string; position: string; role: Role; shiftId: string; status: EmpStatus;
+  salary: SalaryStructure; siteId: string | null;
+  photo: string | null; descriptor: number[] | null; hash: string | null;
+  deviceId: string | null; deviceBoundAt: number | null; createdAt: number;
 }
 
 export interface AttendanceLog {
-  id: string;
-  ts: number;
-  staffId: string;
-  name: string;
-  department: string;
-  siteId: string; // the Gudang/Area where the clock happened
-  type: AttendanceType;
-  lat: number;
-  lon: number;
-  distanceM: number;
-  faceDist: number | null;
-  method: "face" | "manual";
-  source: "gps" | "sim" | "manual";
-  status: "VERIFIED" | "REJECTED";
-  reason: string | null;
-  lateMin?: number;
-  overtimeMin?: number;
-  workMin?: number;
-  photo?: string | null; // verification snapshot thumbnail
+  id: string; ts: number; staffId: string; name: string; department: string; siteId: string;
+  type: AttendanceType; lat: number; lon: number; distanceM: number; faceDist: number | null;
+  method: "face" | "manual"; source: "gps" | "sim" | "manual"; status: "VERIFIED" | "REJECTED";
+  reason: string | null; lateMin?: number; overtimeMin?: number; workMin?: number; photo?: string | null;
 }
 
-export type LeaveType = "Tahunan" | "Sakit" | "Darurat" | "Melahirkan";
-export type LeaveStatus = "pending" | "pending_hr" | "approved" | "rejected";
-export const LEAVE_TYPES: LeaveType[] = ["Tahunan", "Sakit", "Darurat", "Melahirkan"];
-export const LEAVE_QUOTAS: Record<LeaveType, number> = {
-  Tahunan: 12, Sakit: 10, Darurat: 3, Melahirkan: 90,
-};
-
-export interface LeaveDecision { by: string; at: number; }
 export interface LeaveRequest {
-  id: string;
-  staffId: string;
-  name: string;
-  type: LeaveType;
-  date: string; // yyyy-mm-dd
-  days: number;
-  reason: string;
-  attachment: { name: string; dataUrl: string } | null;
-  status: LeaveStatus;
-  managerDecision: LeaveDecision | null;
-  hrDecision: LeaveDecision | null;
+  id: string; staffId: string; name: string; type: LeaveType; date: string; days: number;
+  reason: string; attachment: { name: string; dataUrl: string } | null; status: LeaveStatus;
+  managerDecision: { by: string; at: number } | null; hrDecision: { by: string; at: number } | null;
   createdAt: number;
 }
 
-export interface BreakRec {
-  id: string;
-  staffId: string;
-  day: string; // yyyy-mm-dd
-  start: number;
-  end: number | null;
+export interface Shift { id: string; name: string; start: string; end: string; graceMin: number; color: SiteColor; }
+
+export interface OrgNode {
+  id: string; parentId: string | null; siteId: string; title: string;
+  staffId: string | null; name: string | null; note: string | null; createdAt: number;
 }
 
-export interface Shift {
-  id: string;
-  name: string;
-  start: string; // HH:mm
-  end: string;   // HH:mm
-  graceMin: number;
-  color: string;
+export interface BoardPost {
+  id: string; siteId: string | null; title: string; body: string;
+  tone: "info" | "warn" | "danger" | "ok"; createdBy: string; createdAt: number; acks: string[];
 }
 
-export interface Payslip {
-  id: string;
-  month: string; // yyyy-mm
-  staffId: string;
-  name: string;
-  department: string;
-  position: string;
-  kerjaHari: number;      // expected workdays
-  hadir: number;
-  cuti: number;
-  libur: number;
-  terlambat: number;      // days late
-  totalLateMin: number;
-  lemburMin: number;
-  gajiPokok: number;      // prorated basic
-  transport: number;
-  meal: number;
-  lembur: number;
-  bonus: number;
-  potongTelat: number;
-  potongAbsen: number;
-  bruto: number;
-  potongan: number;
-  net: number;
-  note: string;
-  status: "draft" | "issued";
-  issuedAt: number | null;
-  issuedBy: string | null;
-  createdAt: number;
-}
-
-export interface AuditLog {
-  id: string;
-  ts: number;
-  actorId: string;
-  actorName: string;
-  role: Role | "system";
-  action: string;
-  target: string;
-  detail: string;
-}
-
-export interface Notif {
-  id: string;
-  staffId: string;
-  title: string;
-  body: string;
-  tone: "info" | "ok" | "warn" | "danger";
-  ts: number;
-  read: boolean;
-}
-
-export interface Settings {
-  matchThreshold: number;
-  simEnabled: boolean;
-  simLat: number;
-  simLon: number;
-}
-export const DEFAULT_SETTINGS: Settings = {
-  matchThreshold: 0.5,
-  simEnabled: false,
-  simLat: -6.17555,
-  simLon: 106.82735,
-};
+export interface Notif { id: string; staffId: string; title: string; body: string; tone: "ok" | "warn" | "danger" | "info"; ts: number; read: boolean; }
+export interface AuditLog { id: string; ts: number; actorId: string; actorName: string; role: Role | "system"; action: string; target: string; detail: string; }
+export interface BreakRec { id: string; staffId: string; day: string; start: number; end: number | null; }
 
 export interface Holiday { date: string; name: string; }
-export interface Announcement { text: string; tone: "info" | "warn" | "danger"; }
+export interface AnnouncementBanner { text: string; tone: "info" | "warn" | "danger"; }
 
 export interface Company {
-  id: string;
-  name: string;
-  shortName: string;
-  address: string; // kantor pusat (branding only — geofences live on each Site)
-  deviceBinding: boolean;
-  holidays: Holiday[];
-  appName: string;
-  appTagline: string;
-  logo: string | null;
-  brand: string;
-  announcement: Announcement | null;
-  maintenance: boolean;
+  id: string; name: string; shortName: string; address: string;
+  appName: string; appTagline: string; logo: string | null; brand: string;
+  maintenance: boolean; deviceBinding: boolean;
+  announcement: AnnouncementBanner | null; holidays: Holiday[];
 }
 
-export const SEED_HOLIDAYS: Holiday[] = [
-  { date: "2025-01-01", name: "Tahun Baru Masehi" },
-  { date: "2025-03-31", name: "Idul Fitri 1446 H" },
-  { date: "2025-04-01", name: "Idul Fitri (hari ke-2)" },
-  { date: "2025-05-01", name: "Hari Buruh Internasional" },
-  { date: "2025-08-17", name: "HUT Kemerdekaan RI" },
-  { date: "2025-12-25", name: "Hari Raya Natal" },
-  { date: "2026-01-01", name: "Tahun Baru Masehi" },
-  { date: "2026-03-19", name: "Nyepi" },
-  { date: "2026-03-20", name: "Idul Fitri 1447 H" },
-  { date: "2026-05-01", name: "Hari Buruh Internasional" },
-  { date: "2026-08-17", name: "HUT Kemerdekaan RI" },
-  { date: "2026-12-25", name: "Hari Raya Natal" },
-];
+export interface Site {
+  id: string; name: string; shortName: string; address: string;
+  hqLat: number; hqLon: number; radiusM: number; color: SiteColor;
+}
 
-/* ------------------------- brand preset system --------------------------- */
+export interface Settings { simEnabled: boolean; simLat: number; simLon: number; matchThreshold: number; }
+export interface SmtpConfig { enabled: boolean; host: string; port: number; secure: boolean; user: string; pass: string; fromName: string; }
+export interface ResetToken { token: string; staffId: string; email: string; exp: number; used: boolean; }
+
+export interface Payslip {
+  id: string; staffId: string; name: string; month: string;
+  status: "draft" | "issued"; issuedAt?: number; issuedBy?: string;
+  hadir: number; terlambat: number; lateMin: number;
+  basicProrated: number; allowances: number; overtimePay: number; overtimeMin: number;
+  bonus: number; deductions: number; net: number; note?: string;
+}
+
+export interface TenantIdentity {
+  name: string; appName: string; appTagline: string; logo: string | null; brand: string;
+  announcement?: AnnouncementBanner | null;
+}
+
+export interface MasterPayload {
+  company?: Company; sites?: Site[]; employees?: Employee[]; shifts?: Shift[];
+  departments?: string[]; leaveQuotas?: Partial<Record<LeaveType, number>>;
+  salaryDefaults?: Partial<Record<Role, SalaryStructure>>;
+}
+
+/* ------------------------------- constants ------------------------------ */
+export const NS = "vittoria:";
+export const KEY_COMPANY = NS + "company";
+export const KEY_SITES = NS + "sites";
+export const DATA_VERSION = "7";
+
+export const ROLE_LABEL: Record<Role, string> = {
+  employee: "Karyawan", manager: "Manajer", companyadmin: "Admin HR", superadmin: "Super Admin",
+};
+export const STATUS_LABEL: Record<EmpStatus, string> = { active: "Aktif", inactive: "Nonaktif", resigned: "Resign" };
+export const LEAVE_TYPES: LeaveType[] = ["Tahunan", "Sakit", "Darurat", "Melahirkan"];
+export const LEAVE_QUOTAS: Record<LeaveType, number> = { Tahunan: 12, Sakit: 10, Darurat: 3, Melahirkan: 90 };
+export const EMAIL_DOMAIN = "vittoria.co.id";
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+export const SITE_STYLE: Record<SiteColor, { chip: string; dot: string; grad: string }> = {
+  sun:   { chip: "bg-sun-100 text-sun-700",     dot: "bg-sun-500",   grad: "from-sun-400 to-sun-600" },
+  sky:   { chip: "bg-sky-100 text-sky-600",     dot: "bg-sky-500",   grad: "from-sky-300 to-sky-600" },
+  teal:  { chip: "bg-teal-100 text-teal-600",   dot: "bg-teal-500",  grad: "from-teal-300 to-teal-600" },
+  grape: { chip: "bg-grape-100 text-grape-600", dot: "bg-grape-500", grad: "from-grape-300 to-grape-600" },
+  coral: { chip: "bg-coral-100 text-coral-600", dot: "bg-coral-500", grad: "from-coral-300 to-coral-600" },
+};
+
 export interface BrandPreset { id: string; name: string; swatch: string; vars: Record<string, string>; }
-
 export const BRAND_PRESETS: BrandPreset[] = [
   { id: "sun", name: "Safety Orange", swatch: "#f07300", vars: { "--color-sun-300": "#ffc684", "--color-sun-400": "#ff9d2e", "--color-sun-500": "#f07300", "--color-sun-600": "#d95f00" } },
   { id: "navy", name: "Corporate Navy", swatch: "#2b4d9b", vars: { "--color-sun-300": "#9db6ee", "--color-sun-400": "#5f83d6", "--color-sun-500": "#2b4d9b", "--color-sun-600": "#1f3a78" } },
@@ -274,286 +139,112 @@ export function applyBrand(id: string) {
   Object.entries(preset.vars).forEach(([k, v]) => root.style.setProperty(k, v));
 }
 
-/* ------------------------------ storage ---------------------------------- */
-const NS = "vittoria:";
-export const KEY_COMPANY = NS + "company";
-
+/* -------------------------------- storage ------------------------------- */
 function load<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(NS + key);
     return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
+  } catch { return fallback; }
 }
+
+/** Write-through: hot-cache (localStorage) + durable engine (SQLite). */
 function save(key: string, value: unknown) {
-  try {
-    localStorage.setItem(NS + key, JSON.stringify(value));
-  } catch {
-    /* quota / private mode — surface it so the UI can warn the user */
-    try { window.dispatchEvent(new CustomEvent("vittoria:storage-full", { detail: key })); } catch { /* noop */ }
+  try { localStorage.setItem(NS + key, JSON.stringify(value)); } catch {
+    try { window.dispatchEvent(new Event("vittoria:storage-full")); } catch { /* noop */ }
   }
-}
-
-/** Downscale a captured photo before persisting — keeps localStorage healthy. */
-export function shrinkPhoto(dataUrl: string, maxW = 360): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        if (img.width <= maxW) { resolve(dataUrl); return; }
-        const w = maxW;
-        const h = Math.max(1, Math.round((img.height / img.width) * w));
-        const c = document.createElement("canvas");
-        c.width = w; c.height = h;
-        c.getContext("2d")!.drawImage(img, 0, 0, w, h);
-        resolve(c.toDataURL("image/jpeg", 0.72));
-      } catch { resolve(dataUrl); }
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
-  });
-}
-
-/** Crash log (written by the ErrorBoundary) for the integrity panel. */
-export function readCrashLog(): { ts: number; msg: string } | null {
-  try {
-    const raw = localStorage.getItem("vittoria:crashlog");
-    return raw ? (JSON.parse(raw) as { ts: number; msg: string }) : null;
-  } catch { return null; }
+  if (bridgeMod && engineMod?.sqlReady() && bridgeMod.SPECS[key]) {
+    const rows = key === "company" ? [value as Record<string, unknown>] : (value as Record<string, unknown>[]);
+    if (Array.isArray(rows)) bridgeMod.syncCollection(key, rows);
+  } else if (!bridgeMod) {
+    void bridge(); // warm the module; the boot migration syncs everything anyway
+  }
 }
 
 export function clearAll() {
-  ["employees", "logs", "settings", "seeded", "company", "shifts", "leaves", "breaks", "audit", "notifs", "session", "payslips", "org", "sites", "sitechoice", "board", "departments", "quotas", "salarydefaults", "resets", "smtp"].forEach((k) =>
-    localStorage.removeItem(NS + k),
-  );
+  Object.keys(localStorage).filter((k) => k.startsWith(NS)).forEach((k) => localStorage.removeItem(k));
+  import("./sql/bridge").then((b) => b.clearAllTables()).catch(() => undefined);
 }
 
-/**
- * Schema versioning — when the data model changes between releases we wipe
- * and reseed, so stale local data can never break login or rendering.
- */
-export const DATA_VERSION = "7";
+/* ------------------------------ versioning ------------------------------ */
 export function ensureFreshVersion() {
   try {
     if (localStorage.getItem(NS + "dataversion") !== DATA_VERSION) {
-      clearAll();
+      Object.keys(localStorage).filter((k) => k.startsWith(NS)).forEach((k) => localStorage.removeItem(k));
       localStorage.setItem(NS + "dataversion", DATA_VERSION);
     }
-  } catch { /* storage unavailable — run in-memory */ }
+  } catch { /* private mode */ }
 }
 
-/* ------------------------- legacy migrations ----------------------------- */
-const ROLE_MIGRATION: Record<string, Role> = {
-  admin: "companyadmin", staff: "employee", hr: "companyadmin", su: "superadmin",
-};
-const SHIFT_MIGRATION: Record<string, string> = {
-  pagi: "sh-pagi", siang: "sh-siang", malam: "sh-malam", fleksibel: "sh-fleks",
-};
-const STATUS_MIGRATION: Record<string, EmpStatus> = { disabled: "inactive", resigned: "resigned" };
+/* --------------------------------- seeds -------------------------------- */
+export const SEED_HOLIDAYS: Holiday[] = [
+  { date: "2025-01-01", name: "Tahun Baru Masehi" }, { date: "2025-03-31", name: "Idul Fitri 1446 H" },
+  { date: "2025-05-01", name: "Hari Buruh Internasional" }, { date: "2025-08-17", name: "HUT Kemerdekaan RI" },
+  { date: "2025-12-25", name: "Hari Raya Natal" }, { date: "2026-01-01", name: "Tahun Baru Masehi" },
+  { date: "2026-03-20", name: "Idul Fitri 1447 H" }, { date: "2026-05-01", name: "Hari Buruh Internasional" },
+  { date: "2026-08-17", name: "HUT Kemerdekaan RI" }, { date: "2026-12-25", name: "Hari Raya Natal" },
+];
 
-function migrateEmployee(e: Partial<Employee> & Record<string, unknown>): Employee {
-  const role = (ROLE_MIGRATION[String(e.role ?? "")] ?? e.role ?? "employee") as Role;
-  return {
-    staffId: String(e.staffId ?? "VTR-000"),
-    nik: String(e.nik ?? ""),
-    name: String(e.name ?? "Tanpa Nama"),
-    email: String(e.email ?? slugEmail(String(e.name ?? "staff"), [])),
-    password: String(e.password ?? "123456"),
-    phone: String(e.phone ?? "—"),
-    address: String(e.address ?? "—"),
-    emergencyName: String(e.emergencyName ?? "—"),
-    emergencyPhone: String(e.emergencyPhone ?? "—"),
-    department: String(e.department ?? "Gudang"),
-    position: String(e.position ?? "Staff"),
-    role,
-    shiftId: SHIFT_MIGRATION[String(e.shiftId ?? e.shift ?? "")] ?? String(e.shiftId ?? "sh-pagi"),
-    status: STATUS_MIGRATION[String(e.status ?? "")] ?? (e.status as EmpStatus) ?? "active",
-    salary: (e.salary as SalaryStructure) ?? SEED_SALARY[role],
-    siteId: (e.siteId as string | null) ?? (role === "superadmin" || role === "companyadmin" ? null : "site-vit"),
-    photo: (e.photo as string | null) ?? null,
-    descriptor: (e.descriptor as number[] | null) ?? null,
-    hash: (e.hash as string | null) ?? null,
-    deviceId: (e.deviceId as string | null) ?? null,
-    deviceBoundAt: (e.deviceBoundAt as number | null) ?? null,
-    createdAt: Number(e.createdAt ?? Date.now()),
-  };
-}
-
-export const db = {
-  loadEmployees: () => load<unknown[]>("employees", []).map((e) => migrateEmployee(e as Partial<Employee> & Record<string, unknown>)),
-  saveEmployees: (v: Employee[]) => save("employees", v),
-  loadLogs: () => load<AttendanceLog[]>("logs", []),
-  saveLogs: (v: AttendanceLog[]) => save("logs", v),
-  loadSettings: () => ({ ...DEFAULT_SETTINGS, ...load<Partial<Settings>>("settings", {}) }),
-  saveSettings: (v: Settings) => save("settings", v),
-  wasSeeded: () => load<boolean>("seeded", false),
-  markSeeded: () => save("seeded", true),
-  loadCompany: () => ({ ...seedCompany(), ...load<Partial<Company>>("company", {}) }),
-  saveCompany: (v: Company) => save("company", v),
-  loadShifts: () => load<Shift[]>("shifts", []),
-  saveShifts: (v: Shift[]) => save("shifts", v),
-  loadLeaves: () => load<LeaveRequest[]>("leaves", []),
-  saveLeaves: (v: LeaveRequest[]) => save("leaves", v),
-  loadBreaks: () => load<BreakRec[]>("breaks", []),
-  saveBreaks: (v: BreakRec[]) => save("breaks", v),
-  loadAudit: () => load<AuditLog[]>("audit", []),
-  saveAudit: (v: AuditLog[]) => save("audit", v),
-  loadNotifs: () => load<Notif[]>("notifs", []),
-  saveNotifs: (v: Notif[]) => save("notifs", v),
-  loadSession: () => load<{ staffId: string; access: string; refresh: string; accessExp: number; refreshExp: number } | null>("session", null),
-  saveSession: (v: unknown) => save("session", v),
-  loadPayslips: () => load<Payslip[]>("payslips", []),
-  savePayslips: (v: Payslip[]) => save("payslips", v),
-  loadOrg: () => load<OrgNode[]>("org", []).map((n) => ({ ...n, siteId: n.siteId ?? "site-vit" })),
-  saveOrg: (v: OrgNode[]) => save("org", v),
-  loadBoard: () => {
-    try {
-      if (localStorage.getItem(NS + "board") === null) return seedBoardPosts(); // self-seed once
-    } catch { /* private mode */ }
-    return load<BoardPost[]>("board", []);
-  },
-  saveBoard: (v: BoardPost[]) => save("board", v),
-  loadSites: () => load<Site[]>("sites", []),
-  saveSites: (v: Site[]) => save("sites", v),
-  loadSiteChoice: () => load<string | null>("sitechoice", null),
-  saveSiteChoice: (v: string | null) => save("sitechoice", v),
-  loadDepartments: () => load<string[]>("departments", []),
-  saveDepartments: (v: string[]) => save("departments", v),
-  loadQuotas: () => load<Record<LeaveType, number>>("quotas", { ...LEAVE_QUOTAS }),
-  saveQuotas: (v: Record<LeaveType, number>) => save("quotas", v),
-  loadSalaryDefaults: () => load<Record<Role, SalaryStructure>>("salarydefaults", JSON.parse(JSON.stringify(SEED_SALARY))),
-  loadSmtp: () => ({ ...DEFAULT_SMTP, ...load<Partial<SmtpConfig>>("smtp", {}) }),
-  saveSmtp: (v: SmtpConfig) => save("smtp", v),
-  saveSalaryDefaults: (v: Record<Role, SalaryStructure>) => save("salarydefaults", v),
-  loadResets: () => load<ResetToken[]>("resets", []),
-  saveResets: (v: ResetToken[]) => save("resets", v),
-};
-
-/* --------------------- forgot-password reset tokens ---------------------- */
-export interface ResetToken {
-  token: string;
-  staffId: string;
-  email: string;
-  exp: number; // ms epoch
-  used: boolean;
-}
-
-/* ------------------- master data export/import contract ------------------ */
-export interface MasterPayload {
-  app?: string;
-  version?: string;
-  exportedAt?: number;
-  company?: Partial<Company>;
-  sites?: Site[];
-  departments?: string[];
-  shifts?: Shift[];
-  employees?: Employee[];
-  leaveQuotas?: Record<LeaveType, number>;
-  salaryDefaults?: Record<Role, SalaryStructure>;
-}
-export const KEY_SITES = NS + "sites";
-
-/* ------------------------------- helpers --------------------------------- */
-export function genPassword(): string {
-  return `vtr-${Math.floor(1000 + Math.random() * 9000)}`;
-}
-
-export function slugEmail(name: string, taken: string[]): string {
-  const base =
-    name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s]/g, "")
-      .trim().split(/\s+/).slice(0, 2).join(".") || "staff";
-  let candidate = `${base}@${EMAIL_DOMAIN}`;
-  let i = 2;
-  const t = taken.map((s) => s.toLowerCase());
-  while (t.includes(candidate)) candidate = `${base}${i++}@${EMAIL_DOMAIN}`;
-  return candidate;
-}
-
-export function nextStaffId(employees: Employee[]): string {
-  let max = 0;
-  for (const e of employees) {
-    const m = /^VTR-(\d+)$/.exec(e.staffId);
-    if (m) max = Math.max(max, Number(m[1]));
-  }
-  return `VTR-${String(max + 1).padStart(3, "0")}`;
-}
-
-/* -------------------------------- seeds ---------------------------------- */
 export function seedCompany(): Company {
   return {
-    id: "comp-01",
-    name: "PT Vittoria Logistik Indonesia",
-    shortName: "Vittoria",
+    id: "comp-01", name: "PT Vittoria Logistik Indonesia", shortName: "Vittoria",
     address: "Jl. Gatot Subroto Kav. 21, Jakarta Pusat",
-    deviceBinding: true,
-    holidays: [...SEED_HOLIDAYS],
-    appName: "Vittoria HR",
-    appTagline: "Absensi Wajah & Geofencing",
-    logo: null,
-    brand: "sun",
-    announcement: null,
-    maintenance: false,
+    appName: "Vittoria HR", appTagline: "Absensi Wajah & Geofencing",
+    logo: null, brand: "sun", maintenance: false, deviceBinding: true,
+    announcement: null, holidays: [...SEED_HOLIDAYS],
   };
+}
+
+export function seedSites(): Site[] {
+  return [
+    { id: "site-vit", name: "Gudang Vittoria", shortName: "Vittoria", address: "Jl. Gatot Subroto Kav. 21, Jakarta Pusat", hqLat: -6.1754, hqLon: 106.8272, radiusM: 100, color: "sun" },
+    { id: "site-bc", name: "Gudang Batu Ceper", shortName: "Batu Ceper", address: "Jl. Pembangunan III, Batu Ceper, Tangerang", hqLat: -6.1668, hqLon: 106.6315, radiusM: 120, color: "sky" },
+  ];
 }
 
 export function seedShifts(): Shift[] {
   return [
-    { id: "sh-pagi", name: "Pagi", start: "08:00", end: "16:00", graceMin: 15, color: "sun" },
-    { id: "sh-siang", name: "Siang", start: "12:00", end: "20:00", graceMin: 15, color: "sky" },
-    { id: "sh-malam", name: "Malam", start: "20:00", end: "04:00", graceMin: 20, color: "grape" },
+    { id: "sh-pagi", name: "Shift Pagi", start: "08:00", end: "16:00", graceMin: 15, color: "sun" },
+    { id: "sh-siang", name: "Shift Siang", start: "14:00", end: "22:00", graceMin: 15, color: "sky" },
+    { id: "sh-malam", name: "Shift Malam", start: "22:00", end: "06:00", graceMin: 20, color: "grape" },
     { id: "sh-fleks", name: "Fleksibel", start: "08:00", end: "17:00", graceMin: 60, color: "teal" },
   ];
 }
 
-function mkEmp(
-  staffId: string, name: string, position: string,
-  role: Role, shiftId: string, email: string, password: string,
-  siteId: string | null,
-): Employee {
-  return {
-    staffId,
-    nik: `3171${String(Math.floor(100000000 + Math.random() * 899999999))}`,
-    name, email, password,
-    phone: `+62 812-${String(Math.floor(1000 + Math.random() * 8999))}-${String(Math.floor(1000 + Math.random() * 8999))}`,
-    address: "Jakarta",
-    emergencyName: "Keluarga",
-    emergencyPhone: "+62 811-0000-0000",
-    department: "Gudang", position, role, shiftId,
-    status: "active",
-    salary: { ...SEED_SALARY[role] },
-    siteId,
-    photo: null, descriptor: null, hash: null,
-    deviceId: null, deviceBoundAt: null,
-    createdAt: Date.now() - 60 * 86400_000,
-  };
-}
-
 export function seedEmployees(): Employee[] {
+  const t = Date.now() - 60 * 86400_000;
+  const mk = (
+    staffId: string, name: string, role: Role, dept: string, position: string, shiftId: string,
+    siteId: string | null, email: string, password: string, basic: number,
+  ): Employee => ({
+    staffId, nik: `3171${String(100000000 + Math.floor(Math.random() * 899999999))}`, name, email, password,
+    phone: "+62 812-0000-0000", address: "—", emergencyName: "—", emergencyPhone: "—",
+    department: dept, position, role, shiftId, status: "active",
+    salary: { basic, transport: 20_000, meal: 15_000, otPerHour: role === "employee" ? 30_000 : 45_000 },
+    siteId, photo: null, descriptor: null, hash: null, deviceId: null, deviceBoundAt: null, createdAt: t,
+  });
   return [
-    mkEmp("SU-001", "Wahyu Handoko", "Super Admin", "superadmin", "sh-fleks", "wh.leader.vt@gmail.com", "super123", null),
-    mkEmp("HR-001", "Maya Kirana", "HR Manager", "companyadmin", "sh-fleks", `hr@${EMAIL_DOMAIN}`, "admin123", null),
-    mkEmp("MGR-001", "Budi Hartono", "Manajer Operasional", "manager", "sh-pagi", `budi.hartono@${EMAIL_DOMAIN}`, "123456", "site-vit"),
-    mkEmp("VTR-001", "Andi Saputra", "Operator Forklift", "employee", "sh-pagi", `andi.saputra@${EMAIL_DOMAIN}`, "123456", "site-vit"),
-    mkEmp("VTR-002", "Rina Marlina", "Admin Gudang", "employee", "sh-pagi", `rina.marlina@${EMAIL_DOMAIN}`, "123456", "site-vit"),
-    mkEmp("VTR-003", "Joko Prasetyo", "Driver", "employee", "sh-siang", `joko.prasetyo@${EMAIL_DOMAIN}`, "123456", "site-bc"),
-    mkEmp("VTR-004", "Sari Wulandari", "Inspector", "employee", "sh-pagi", `sari.wulandari@${EMAIL_DOMAIN}`, "123456", "site-bc"),
-    mkEmp("VTR-005", "Dedi Kurniawan", "Picker", "employee", "sh-malam", `dedi.kurniawan@${EMAIL_DOMAIN}`, "123456", "site-vit"),
+    mk("SU-001", "Wahyu Handoko", "superadmin", "Direksi", "Direktur Utama", "sh-fleks", null, "wh.leader.vt@gmail.com", "super123", 25_000_000),
+    mk("HR-001", "Maya Kirana", "companyadmin", "HR", "HR Manager", "sh-fleks", null, `hr@${EMAIL_DOMAIN}`, "admin123", 12_000_000),
+    mk("MGR-001", "Budi Hartono", "manager", "Gudang", "Manajer Operasional", "sh-pagi", "site-vit", `budi.hartono@${EMAIL_DOMAIN}`, "123456", 9_500_000),
+    mk("VTR-001", "Andi Saputra", "employee", "Gudang", "Operator Forklift", "sh-pagi", "site-vit", `andi.saputra@${EMAIL_DOMAIN}`, "123456", 5_200_000),
+    mk("VTR-002", "Rina Marlina", "employee", "Gudang", "Admin Gudang", "sh-pagi", "site-vit", `rina.marlina@${EMAIL_DOMAIN}`, "123456", 5_600_000),
+    mk("VTR-003", "Joko Prasetyo", "employee", "Gudang", "Driver", "sh-siang", "site-bc", `joko.prasetyo@${EMAIL_DOMAIN}`, "123456", 5_400_000),
+    mk("VTR-004", "Sari Wulandari", "employee", "Gudang", "Inspector", "sh-pagi", "site-bc", `sari.wulandari@${EMAIL_DOMAIN}`, "123456", 5_300_000),
+    mk("VTR-005", "Dedi Kurniawan", "employee", "Gudang", "Picker", "sh-malam", "site-vit", `dedi.kurniawan@${EMAIL_DOMAIN}`, "123456", 5_100_000),
   ];
 }
 
-function dayKeyOffset(daysAgo: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+function dayKeyOffset(offset: number): string {
+  const d = new Date(); d.setDate(d.getDate() - offset);
+  return wibDayKey(d);
 }
-function tsAt(day: string, hm: string): number {
-  return new Date(`${day}T${hm}:00+07:00`).getTime();
+function tsAt(dayKey: string, hm: string): number {
+  return new Date(`${dayKey}T${hm}:00+07:00`).getTime();
 }
 
 export function seedLogs(sites: Site[]): AttendanceLog[] {
   const logs: AttendanceLog[] = [];
-  const roster: Array<{ id: string; name: string; site: string }> = [
+  const roster = [
     { id: "MGR-001", name: "Budi Hartono", site: "site-vit" },
     { id: "VTR-001", name: "Andi Saputra", site: "site-vit" },
     { id: "VTR-002", name: "Rina Marlina", site: "site-vit" },
@@ -561,354 +252,352 @@ export function seedLogs(sites: Site[]): AttendanceLog[] {
     { id: "VTR-004", name: "Sari Wulandari", site: "site-bc" },
     { id: "VTR-005", name: "Dedi Kurniawan", site: "site-vit" },
   ];
-  const siteById = new Map(sites.map((s) => [s.id, s]));
+  const byId = new Map(sites.map((s) => [s.id, s]));
   for (let d = 6; d >= 0; d--) {
     const day = dayKeyOffset(d);
-    roster.forEach((s, si) => {
-      const st = siteById.get(s.site);
-      if (!st) return;
+    roster.forEach((r, si) => {
+      const st = byId.get(r.site); if (!st) return;
       const dist = 18 + ((si * 13 + d * 7) % 70);
       const late = (si + d) % 5 === 0;
       const inHm = late ? `08:${String(22 + ((si * 3) % 20)).padStart(2, "0")}` : `07:${String(45 + ((si * 4) % 14)).padStart(2, "0")}`;
-      const outHm = `16:${String(5 + ((si * 6) % 30)).padStart(2, "0")}`;
       logs.push({
-        id: uid("log"), ts: tsAt(day, inHm), staffId: s.id, name: s.name, department: "Gudang",
-        siteId: st.id,
+        id: uid("log"), ts: tsAt(day, inHm), staffId: r.id, name: r.name, department: "Gudang", siteId: st.id,
         type: "IN", lat: st.hqLat + (si % 3) * 0.00012, lon: st.hqLon + (si % 2) * 0.0001,
         distanceM: dist, faceDist: Math.round((0.28 + (si % 4) * 0.04) * 1000) / 1000,
         method: "face", source: "gps", status: "VERIFIED", reason: null,
         lateMin: late ? 10 + ((si * 5) % 25) : undefined,
       });
       logs.push({
-        id: uid("log"), ts: tsAt(day, outHm), staffId: s.id, name: s.name, department: "Gudang",
-        siteId: st.id,
-        type: "OUT", lat: st.hqLat + (si % 3) * 0.00012, lon: st.hqLon + (si % 2) * 0.0001,
+        id: uid("log"), ts: tsAt(day, `16:${String(5 + ((si * 6) % 30)).padStart(2, "0")}`), staffId: r.id, name: r.name,
+        department: "Gudang", siteId: st.id, type: "OUT", lat: st.hqLat + (si % 3) * 0.00012, lon: st.hqLon + (si % 2) * 0.0001,
         distanceM: dist + 4, faceDist: Math.round((0.3 + (si % 4) * 0.035) * 1000) / 1000,
         method: "face", source: "gps", status: "VERIFIED", reason: null,
-        workMin: 450 + ((si * 17) % 60),
-        overtimeMin: si % 3 === 0 ? 15 + si * 6 : undefined,
+        workMin: 450 + ((si * 17) % 60), overtimeMin: si % 3 === 0 ? 15 + si * 6 : undefined,
       });
     });
-    // one rejected geofence attempt for the anomaly widget
     if (d % 2 === 0) {
-      const st = siteById.get("site-vit");
-      if (st) {
-        logs.push({
-          id: uid("log"), ts: tsAt(day, "08:41"), staffId: "VTR-005", name: "Dedi Kurniawan", department: "Gudang",
-          siteId: st.id,
-          type: "IN", lat: st.hqLat + 0.004, lon: st.hqLon + 0.003,
-          distanceM: st.radiusM + 320, faceDist: 0.31,
-          method: "face", source: "gps", status: "REJECTED",
-          reason: `Di luar radius (${st.radiusM + 320} m)`,
-        });
-      }
+      const st = byId.get("site-vit");
+      if (st) logs.push({
+        id: uid("log"), ts: tsAt(day, "08:41"), staffId: "VTR-005", name: "Dedi Kurniawan", department: "Gudang",
+        siteId: st.id, type: "IN", lat: st.hqLat + 0.004, lon: st.hqLon + 0.003,
+        distanceM: st.radiusM + 320, faceDist: 0.31, method: "face", source: "gps", status: "REJECTED",
+        reason: `Di luar radius (${st.radiusM + 320} m)`,
+      });
     }
   }
   return logs.sort((a, b) => b.ts - a.ts);
 }
 
 export function seedLeaves(): LeaveRequest[] {
-  const today = dayKeyOffset(0);
-  const d = new Date();
-  d.setDate(d.getDate() + 6);
-  const future = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+  const t = Date.now();
   return [
-    {
-      id: uid("lv"), staffId: "VTR-001", name: "Andi Saputra", type: "Tahunan", date: future, days: 2,
-      reason: "Acara keluarga di Bandung", attachment: null, status: "pending",
-      managerDecision: null, hrDecision: null, createdAt: Date.now() - 5 * 3600_000,
-    },
-    {
-      id: uid("lv"), staffId: "VTR-004", name: "Sari Wulandari", type: "Sakit", date: today, days: 1,
-      reason: "Demam, surat dokter terlampir", attachment: null, status: "pending",
-      managerDecision: null, hrDecision: null, createdAt: Date.now() - 2 * 3600_000,
-    },
-    {
-      id: uid("lv"), staffId: "VTR-005", name: "Dedi Kurniawan", type: "Darurat", date: today, days: 1,
-      reason: "Urusan keluarga mendesak", attachment: null, status: "pending_hr",
-      managerDecision: { by: "Budi Hartono", at: Date.now() - 3600_000 }, hrDecision: null,
-      createdAt: Date.now() - 8 * 3600_000,
-    },
-    {
-      id: uid("lv"), staffId: "VTR-002", name: "Rina Marlina", type: "Tahunan", date: dayKeyOffset(-12), days: 1,
-      reason: "Perpanjang SIM", attachment: null, status: "approved",
-      managerDecision: { by: "Budi Hartono", at: Date.now() - 13 * 86400_000 },
-      hrDecision: { by: "Maya Kirana", at: Date.now() - 13 * 86400_000 + 7200_000 },
-      createdAt: Date.now() - 14 * 86400_000,
-    },
+    { id: uid("lv"), staffId: "VTR-002", name: "Rina Marlina", type: "Tahunan", date: dayKeyOffset(-4), days: 2, reason: "Acara keluarga di Bandung", attachment: null, status: "pending", managerDecision: null, hrDecision: null, createdAt: t - 5 * 3600_000 },
+    { id: uid("lv"), staffId: "VTR-003", name: "Joko Prasetyo", type: "Sakit", date: dayKeyOffset(-2), days: 1, reason: "Demam, surat dokter menyusul", attachment: null, status: "pending_hr", managerDecision: { by: "Budi Hartono", at: t - 20 * 3600_000 }, hrDecision: null, createdAt: t - 26 * 3600_000 },
+    { id: uid("lv"), staffId: "VTR-001", name: "Andi Saputra", type: "Tahunan", date: dayKeyOffset(6), days: 1, reason: "Urusan administrasi", attachment: null, status: "approved", managerDecision: { by: "Budi Hartono", at: t - 6 * 86400_000 }, hrDecision: { by: "Maya Kirana", at: t - 5 * 86400_000 }, createdAt: t - 7 * 86400_000 },
   ];
-}
-
-export function seedAudit(): AuditLog[] {
-  return [
-    { id: uid("aud"), ts: Date.now() - 30 * 60000, actorId: "system", actorName: "Sistem", role: "system", action: "SEED_DATA", target: "tenant", detail: "Data demo dimuat (karyawan, shift, absen 7 hari)" },
-    { id: uid("aud"), ts: Date.now() - 25 * 60000, actorId: "HR-001", actorName: "Maya Kirana", role: "companyadmin", action: "AUTH_LOGIN", target: "HR-001", detail: "Login berhasil · JWT diterbitkan (8 jam)" },
-    { id: uid("aud"), ts: Date.now() - 20 * 60000, actorId: "HR-001", actorName: "Maya Kirana", role: "companyadmin", action: "GEOFENCE_UPDATE", target: "comp-01", detail: "Radius → 100 m" },
-    { id: uid("aud"), ts: Date.now() - 9 * 3600_000, actorId: "MGR-001", actorName: "Budi Hartono", role: "manager", action: "LEAVE_APPROVE_MGR", target: "VTR-005", detail: "Darurat 1 hari → pending_hr" },
-  ];
-}
-
-export function seedNotifs(): Notif[] {
-  return [
-    { id: uid("ntf"), staffId: "HR-001", title: "Persetujuan menunggu", body: "1 pengajuan cuti tahap HR menunggu keputusan Anda.", tone: "warn", ts: Date.now() - 3 * 3600_000, read: false },
-    { id: uid("ntf"), staffId: "MGR-001", title: "Persetujuan menunggu", body: "Andi Saputra mengajukan cuti 2 hari.", tone: "info", ts: Date.now() - 5 * 3600_000, read: false },
-  ];
-}
-
-/* ------------------------- organization chart ---------------------------- */
-export interface OrgNode {
-  id: string;
-  parentId: string | null;
-  siteId: string; // each Gudang owns its own structure
-  title: string;
-  staffId: string | null;
-  name: string | null;
-  note: string | null;
-  createdAt: number;
 }
 
 export function seedOrgNodes(): OrgNode[] {
   const t = Date.now() - 30 * 86400_000;
   return [
-    /* Gudang Vittoria */
     { id: "org-vit-root", parentId: null, siteId: "site-vit", title: "Manajer Operasional", staffId: "MGR-001", name: null, note: "Pimpinan gudang & armada", createdAt: t },
     { id: "org-vit-adm", parentId: "org-vit-root", siteId: "site-vit", title: "Admin Gudang", staffId: "VTR-002", name: null, note: null, createdAt: t + 1 },
     { id: "org-vit-frk", parentId: "org-vit-root", siteId: "site-vit", title: "Operator Forklift", staffId: "VTR-001", name: null, note: "Shift pagi", createdAt: t + 2 },
     { id: "org-vit-pck", parentId: "org-vit-root", siteId: "site-vit", title: "Picker", staffId: "VTR-005", name: null, note: "Shift malam", createdAt: t + 3 },
-    /* Gudang Batu Ceper */
     { id: "org-bc-root", parentId: null, siteId: "site-bc", title: "Kepala Gudang", staffId: null, name: "Hasan Basri", note: "Pimpinan gudang Batu Ceper", createdAt: t + 4 },
     { id: "org-bc-drv", parentId: "org-bc-root", siteId: "site-bc", title: "Driver", staffId: "VTR-003", name: null, note: null, createdAt: t + 5 },
     { id: "org-bc-qc", parentId: "org-bc-root", siteId: "site-bc", title: "Inspector", staffId: "VTR-004", name: null, note: null, createdAt: t + 6 },
   ];
 }
 
-/* ------------------------ papan pengumuman (board posts) ----------------- */
-export interface BoardPost {
-  id: string;
-  siteId: string | null; // null = semua area
-  title: string;
-  body: string;
-  tone: "info" | "warn" | "danger" | "ok";
-  createdBy: string;
-  createdAt: number;
-  acks: string[]; // staffIds yang sudah menekan "Mengerti"
-}
-
 export function seedBoardPosts(): BoardPost[] {
   return [
-    {
-      id: "an-1", siteId: null, tone: "warn",
-      title: "Stock opname akhir bulan",
-      body: "Gudang akan stock opname hari Sabtu 08.00–12.00. Semua staf wajib hadir; absensi tetap menggunakan wajah + GPS seperti biasa.",
-      createdBy: "Maya Kirana", createdAt: Date.now() - 6 * 3600_000, acks: ["VTR-002"],
-    },
-    {
-      id: "an-2", siteId: "site-vit", tone: "info",
-      title: "APD baru sudah tersedia",
-      body: "Rompi & helm baru bisa diambil di ruang admin depan. Mohon tukarkan yang lama.",
-      createdBy: "Budi Hartono", createdAt: Date.now() - 26 * 3600_000, acks: ["VTR-001", "VTR-005"],
-    },
+    { id: "an-1", siteId: null, tone: "warn", title: "Stock opname akhir bulan", body: "Gudang akan stock opname hari Sabtu 08.00–12.00. Semua staf wajib hadir; absensi tetap menggunakan wajah + GPS.", createdBy: "Maya Kirana", createdAt: Date.now() - 6 * 3600_000, acks: ["VTR-002"] },
+    { id: "an-2", siteId: "site-vit", tone: "info", title: "APD baru sudah tersedia", body: "Rompi & helm baru bisa diambil di ruang admin depan. Mohon tukarkan yang lama.", createdBy: "Budi Hartono", createdAt: Date.now() - 26 * 3600_000, acks: ["VTR-001", "VTR-005"] },
   ];
 }
 
-/* ------------------------------ SMTP config ------------------------------ */
-export interface SmtpConfig {
-  enabled: boolean;
-  host: string;
-  port: number;
-  secure: boolean; // true = SSL (465), false = STARTTLS (587)
-  user: string;    // full email address (Gmail: you@gmail.com)
-  pass: string;    // Gmail: use a 16-char App Password, NOT your regular password
-  fromName: string;
+export function seedAudit(): AuditLog[] {
+  const t = Date.now();
+  return [
+    { id: uid("aud"), ts: t - 3 * 3600_000, actorId: "system", actorName: "Sistem", role: "system", action: "SEED", target: "tenant", detail: "Data demo Vittoria (2 gudang) dimuat" },
+    { id: uid("aud"), ts: t - 2 * 3600_000, actorId: "HR-001", actorName: "Maya Kirana", role: "companyadmin", action: "GEOFENCE_UPDATE", target: "site-vit", detail: "Radius Gudang Vittoria → 100 m" },
+  ];
 }
 
-export const DEFAULT_SMTP: SmtpConfig = {
-  enabled: false,
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
-  user: "",
-  pass: "",
-  fromName: "Vittoria HR",
+export function seedNotifs(): Notif[] {
+  return [
+    { id: uid("ntf"), staffId: "MGR-001", title: "Cuti menunggu persetujuan", body: "Rina Marlina · Tahunan 2 hari", tone: "warn", ts: Date.now() - 5 * 3600_000, read: false },
+  ];
+}
+
+/* ------------------------------ accessors ------------------------------- */
+const migrateEmployee = (e: Partial<Employee>): Employee => ({
+  staffId: e.staffId ?? "—", nik: e.nik ?? "—", name: e.name ?? "—", email: e.email ?? "—",
+  password: e.password ?? "123456", phone: e.phone ?? "—", address: e.address ?? "—",
+  emergencyName: e.emergencyName ?? "—", emergencyPhone: e.emergencyPhone ?? "—",
+  department: e.department === "Direksi" || e.department === "HR" ? e.department : "Gudang",
+  position: e.position ?? "Staff", role: e.role ?? "employee", shiftId: e.shiftId ?? "sh-pagi",
+  status: e.status ?? "active",
+  salary: e.salary ?? { basic: 5_200_000, transport: 20_000, meal: 15_000, otPerHour: 30_000 },
+  siteId: e.siteId === undefined ? (e.role === "superadmin" || e.role === "companyadmin" ? null : "site-vit") : e.siteId,
+  photo: e.photo ?? null, descriptor: e.descriptor ?? null, hash: e.hash ?? null,
+  deviceId: e.deviceId ?? null, deviceBoundAt: e.deviceBoundAt ?? null, createdAt: e.createdAt ?? Date.now(),
+});
+
+export const db = {
+  loadCompany: (): Company => ({ ...seedCompany(), ...load<Partial<Company>>("company", {}) }),
+  saveCompany: (v: Company) => save("company", v),
+  loadSites: (): Site[] => { const s = load<Site[]>("sites", []); return s.length ? s : seedSites(); },
+  saveSites: (v: Site[]) => save("sites", v),
+  loadSiteChoice: () => load<string | null>("sitechoice", null),
+  saveSiteChoice: (v: string | null) => save("sitechoice", v),
+  loadEmployees: () => load<Partial<Employee>[]>("employees", []).map(migrateEmployee),
+  saveEmployees: (v: Employee[]) => save("employees", v),
+  loadLogs: () => load<AttendanceLog[]>("logs", []),
+  saveLogs: (v: AttendanceLog[]) => save("logs", v),
+  loadLeaves: () => load<LeaveRequest[]>("leaves", []),
+  saveLeaves: (v: LeaveRequest[]) => save("leaves", v),
+  loadShifts: () => load<Shift[]>("shifts", []),
+  saveShifts: (v: Shift[]) => save("shifts", v),
+  loadOrg: () => load<OrgNode[]>("org", []).map((n) => ({ ...n, siteId: n.siteId ?? "site-vit" })),
+  saveOrg: (v: OrgNode[]) => save("org", v),
+  loadBoard: () => load<BoardPost[]>("board", []),
+  saveBoard: (v: BoardPost[]) => save("board", v),
+  loadDepartments: () => { const d = load<string[]>("departments", []); return d.length ? d : ["Gudang"]; },
+  saveDepartments: (v: string[]) => save("departments", v),
+  loadQuotas: () => load<Record<LeaveType, number>>("quotas", { ...LEAVE_QUOTAS }),
+  saveQuotas: (v: Record<LeaveType, number>) => save("quotas", v),
+  loadSalaryDefaults: () => load<Record<Role, SalaryStructure>>("salarydefaults", {
+    employee: { basic: 5_200_000, transport: 20_000, meal: 15_000, otPerHour: 30_000 },
+    manager: { basic: 9_500_000, transport: 25_000, meal: 20_000, otPerHour: 45_000 },
+    companyadmin: { basic: 12_000_000, transport: 25_000, meal: 20_000, otPerHour: 50_000 },
+    superadmin: { basic: 25_000_000, transport: 30_000, meal: 25_000, otPerHour: 60_000 },
+  }),
+  saveSalaryDefaults: (v: Record<Role, SalaryStructure>) => save("salarydefaults", v),
+  loadAudit: () => load<AuditLog[]>("audit", []),
+  saveAudit: (v: AuditLog[]) => save("audit", v),
+  loadNotifs: () => load<Notif[]>("notifs", []),
+  saveNotifs: (v: Notif[]) => save("notifs", v),
+  loadBreaks: () => load<BreakRec[]>("breaks", []),
+  saveBreaks: (v: BreakRec[]) => save("breaks", v),
+  loadResets: () => load<ResetToken[]>("resets", []),
+  saveResets: (v: ResetToken[]) => save("resets", v),
+  loadSettings: (): Settings => ({ simEnabled: false, simLat: -6.17555, simLon: 106.82735, matchThreshold: 0.5, ...load<Partial<Settings>>("settings", {}) }),
+  saveSettings: (v: Settings) => save("settings", v),
+  loadSmtp: (): SmtpConfig => ({ enabled: false, host: "smtp.gmail.com", port: 465, secure: true, user: "", pass: "", fromName: "Vittoria HR", ...load<Partial<SmtpConfig>>("smtp", {}) }),
+  saveSmtp: (v: SmtpConfig) => save("smtp", v),
+  loadSession: () => load<{ staffId: string; siteId: string; accessExp: number; refreshExp: number; access: string; refresh: string } | null>("session", null),
+  saveSession: (v: unknown) => save("session", v),
+  wasSeeded: () => load<boolean>("seeded", false),
+  markSeeded: () => save("seeded", true),
 };
 
-/** Shape for the Super Admin's "Copy Netlify env vars" action. */
-export function smtpEnvBlock(c: SmtpConfig): string {
-  return [
-    `SMTP_HOST=${c.host}`,
-    `SMTP_PORT=${c.port}`,
-    `SMTP_SECURE=${c.secure}`,
-    `SMTP_USER=${c.user}`,
-    `SMTP_PASS=${c.pass}`,
-    `SMTP_FROM_NAME=${c.fromName}`,
-  ].join("\n");
+/* --------------------- SQL boot: one-way migration ---------------------- */
+/** After the engine is ready: if SQL is empty but the cache is seeded, copy everything in. */
+export async function bootSqlSync() {
+  const eng = await engine();
+  const br = await bridge();
+  if (!eng.sqlReady()) return;
+  if (eng.sqlGetMeta("migrated") === "1") return;
+  const push = (key: string, rows: Record<string, unknown>[]) => { if (rows.length) br.syncCollection(key, rows); };
+  push("company", [db.loadCompany() as unknown as Record<string, unknown>]);
+  push("sites", db.loadSites() as unknown as Record<string, unknown>[]);
+  push("employees", db.loadEmployees() as unknown as Record<string, unknown>[]);
+  push("logs", db.loadLogs() as unknown as Record<string, unknown>[]);
+  push("leaves", db.loadLeaves() as unknown as Record<string, unknown>[]);
+  push("shifts", db.loadShifts() as unknown as Record<string, unknown>[]);
+  push("org", db.loadOrg() as unknown as Record<string, unknown>[]);
+  push("board", db.loadBoard() as unknown as Record<string, unknown>[]);
+  push("departments", db.loadDepartments().map((name) => ({ name })));
+  push("quotas", Object.entries(db.loadQuotas()).map(([type, days]) => ({ type, days })));
+  push("salarydefaults", Object.entries(db.loadSalaryDefaults()).map(([role, s]) => ({ role, ...s })));
+  push("audits", db.loadAudit() as unknown as Record<string, unknown>[]);
+  push("notifs", db.loadNotifs() as unknown as Record<string, unknown>[]);
+  push("breaks", db.loadBreaks() as unknown as Record<string, unknown>[]);
+  push("resets", db.loadResets() as unknown as Record<string, unknown>[]);
+  eng.sqlSetMeta("migrated", "1");
+  eng.sqlSetMeta("migrated_at", String(Date.now()));
 }
 
-/* ------------------------- tenant identity codec ------------------------- */
-export interface TenantIdentity {
-  appName: string;
-  appTagline: string;
-  logo: string | null;
-  brand: string;
-  name: string;
-  shortName: string;
-  announcement: Announcement | null;
-  maintenance: boolean;
-}
-
-export function encodeIdentity(c: Company): string {
-  const payload: TenantIdentity = {
-    appName: c.appName, appTagline: c.appTagline, logo: c.logo, brand: c.brand,
-    name: c.name, shortName: c.shortName, announcement: c.announcement, maintenance: c.maintenance,
+/** Hydrate collections from SQL (source of truth once migrated). */
+export async function hydrateFromSql(): Promise<Record<string, unknown[]> | null> {
+  const eng = await engine();
+  if (!eng.sqlReady() || eng.sqlGetMeta("migrated") !== "1") return null;
+  const br = await bridge();
+  const read = <T,>(key: string): T[] => br.readCollection<T>(key);
+  return {
+    company: read("company"), sites: read("sites"), employees: read("employees"),
+    logs: read("logs"), leaves: read("leaves"), shifts: read("shifts"),
+    org: read("org"), board: read("board"), departments: read("departments"),
+    quotas: read("quotas"), salarydefaults: read("salarydefaults"),
+    audits: read("audits"), notifs: read("notifs"), breaks: read("breaks"),
+    resets: read("resets"),
   };
-  return "vt1." + btoa(unescape(encodeURIComponent(JSON.stringify(payload)))).replace(/=+$/, "");
 }
 
+/* ------------------------------- utilities ------------------------------ */
+export function slugEmail(name: string, taken: string[]): string {
+  const base = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s]/g, "").trim().split(/\s+/).slice(0, 2).join(".") || "staff";
+  let candidate = `${base}@${EMAIL_DOMAIN}`;
+  let i = 2;
+  const t = taken.map((s) => s.toLowerCase());
+  while (t.includes(candidate)) candidate = `${base}${i++}@${EMAIL_DOMAIN}`;
+  return candidate;
+}
+
+export function genPassword(): string { return `vtr-${Math.floor(1000 + Math.random() * 9000)}`; }
+
+export function nextStaffId(employees: Employee[]): string {
+  let max = 0;
+  for (const e of employees) {
+    const m = e.staffId.match(/^VTR-(\d+)$/);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `VTR-${String(max + 1).padStart(3, "0")}`;
+}
+
+export function encodeIdentity(c: Pick<Company, "name" | "appName" | "appTagline" | "logo" | "brand">): string {
+  const payload: TenantIdentity = { name: c.name, appName: c.appName, appTagline: c.appTagline, logo: c.logo, brand: c.brand };
+  return `vt1.${btoa(unescape(encodeURIComponent(JSON.stringify(payload))))}`;
+}
 export function decodeIdentity(code: string): TenantIdentity | null {
   try {
-    const raw = code.trim().startsWith("vt1.") ? code.trim().slice(4) : code.trim();
-    const padded = raw + "=".repeat((4 - (raw.length % 4)) % 4);
-    const obj = JSON.parse(decodeURIComponent(escape(atob(padded))));
-    if (typeof obj?.appName !== "string") return null;
-    return obj as TenantIdentity;
-  } catch {
-    return null;
-  }
+    const m = code.trim().match(/^vt1\.(.+)$/s);
+    if (!m) return null;
+    const p = JSON.parse(decodeURIComponent(escape(atob(m[1])))) as TenantIdentity;
+    return typeof p.appName === "string" ? p : null;
+  } catch { return null; }
 }
 
-/* --------------------------- calendar helpers ---------------------------- */
+export function buildCsv(logs: AttendanceLog[]): string {
+  const head = ["Waktu (WIB)", "Staff ID", "Nama", "Departemen", "Gudang", "Tipe", "Status", "Jarak (m)", "Face Δ", "Metode", "Sumber", "Alasan"];
+  const rows = logs.map((l) => [
+    new Date(l.ts).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }),
+    l.staffId, l.name, l.department, l.siteId, l.type, l.status,
+    String(Math.round(l.distanceM)), l.faceDist?.toFixed(3) ?? "", l.method, l.source, l.reason ?? "",
+  ]);
+  return "\uFEFF" + [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";")).join("\n");
+}
+
+export function downloadTextFile(name: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+export function downloadBlob(name: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/* ------------------------------ date helpers ---------------------------- */
 export function monthDays(month: string): string[] {
   const [y, m] = month.split("-").map(Number);
   const last = new Date(y, m, 0).getDate();
   return Array.from({ length: last }, (_, i) => `${month}-${String(i + 1).padStart(2, "0")}`);
 }
-
 export function monthLabel(month: string): string {
   const [y, m] = month.split("-").map(Number);
-  return new Intl.DateTimeFormat("id-ID", { timeZone: "Asia/Jakarta", month: "long", year: "numeric" })
-    .format(new Date(y, m - 1, 1));
+  const name = new Intl.DateTimeFormat("id-ID", { month: "long" }).format(new Date(y, m - 1, 1));
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${y}`;
 }
-
-export function expectedWorkdays(month: string, holidays?: Holiday[]): number {
-  const hols = new Set((holidays ?? []).map((h) => h.date));
-  return monthDays(month).filter((day) => {
-    const dow = new Date(`${day}T12:00:00+07:00`).getDay();
-    return dow !== 0 && dow !== 6 && !hols.has(day);
+export function monthWorkdays(month: string, holidays: Holiday[]): number {
+  return monthDays(month).filter((d) => {
+    const wd = new Date(`${d}T00:00:00+07:00`).getDay();
+    return wd !== 0 && wd !== 6 && !holidays.some((h) => h.date === d);
   }).length;
 }
 
 export interface DaySummary {
-  inTs: number | null;
-  outTs: number | null;
-  breakMin: number;
-  workMin: number;
-  lateMin: number;
-  overtimeMin: number;
-  otMin: number;
-  kind: "work" | "late" | "leave" | "absent" | "holiday" | "none";
+  inTs: number | null; outTs: number | null; breakMin: number; workMin: number;
+  lateMin: number; overtimeMin: number; kind: "work" | "leave" | "holiday" | "none";
 }
-
 export function daySummary(
-  staffId: string, day: string,
-  logs: AttendanceLog[], breaks: BreakRec[], leaves: LeaveRequest[],
-  shifts: Shift[], shiftId: string, holidays?: Holiday[],
+  staffId: string, day: string, logs: AttendanceLog[], breaks: BreakRec[], leaves: LeaveRequest[],
+  shifts: Shift[], shiftId: string, holidays: Holiday[],
 ): DaySummary {
   const dayLogs = logs.filter((l) => l.staffId === staffId && wibDayKey(new Date(l.ts)) === day && l.status === "VERIFIED");
-  const inTs = dayLogs.find((l) => l.type === "IN")?.ts ?? null;
-  const outTs = [...dayLogs].reverse().find((l) => l.type === "OUT" && (!inTs || l.ts >= inTs))?.ts ?? null;
-  const lateMin = dayLogs.filter((l) => l.type === "IN").reduce((a, l) => a + (l.lateMin ?? 0), 0);
-  const overtimeMin = dayLogs.reduce((a, l) => a + (l.overtimeMin ?? 0), 0);
-  const breakMin = Math.round(
-    breaks.filter((b) => b.staffId === staffId && b.day === day && b.end).reduce((a, b) => a + (b.end! - b.start), 0) / 60000,
-  );
-  let workMin = 0;
-  if (inTs && outTs) workMin = Math.max(0, Math.round((outTs - inTs) / 60000 - breakMin));
-  else if (inTs && !outTs) workMin = Math.max(0, Math.round((Date.now() - inTs) / 60000 - breakMin));
-
-  const onLeave = leaves.some((l) => l.staffId === staffId && l.status === "approved" && l.date <= day && day <= addDays(l.date, l.days - 1));
-  const isHoliday = holidays?.some((h) => h.date === day) ?? false;
-  const kind: DaySummary["kind"] = inTs
-    ? (lateMin > 0 ? "late" : "work")
-    : onLeave ? "leave" : isHoliday ? "holiday" : "none";
-  return { inTs, outTs, breakMin, workMin, lateMin, overtimeMin, otMin: overtimeMin, kind };
+  const inLog = [...dayLogs].reverse().find((l) => l.type === "IN");
+  const outLog = [...dayLogs].reverse().find((l) => l.type === "OUT" && (!inLog || l.ts >= inLog.ts));
+  const breakMin = Math.round(breaks.filter((b) => b.staffId === staffId && b.day === day && b.end).reduce((a, b) => a + (b.end! - b.start), 0) / 60000);
+  const sh = shifts.find((s) => s.id === shiftId);
+  let lateMin = 0;
+  if (inLog && sh && sh.id !== "sh-fleks") {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(inLog.ts));
+    const mins = (Number(parts.find((p) => p.type === "hour")?.value) % 24) * 60 + Number(parts.find((p) => p.type === "minute")?.value);
+    const start = Number(sh.start.slice(0, 2)) * 60 + Number(sh.start.slice(3));
+    lateMin = Math.max(0, mins - start - sh.graceMin);
+  }
+  const onLeave = leaves.some((lv) => lv.staffId === staffId && lv.status === "approved" && lv.date <= day && day <= lv.date);
+  const isHoliday = holidays.some((h) => h.date === day);
+  const workMin = inLog && outLog ? Math.max(0, Math.round((outLog.ts - inLog.ts) / 60000) - breakMin) : inLog ? outLog?.workMin ?? 0 : 0;
+  const overtimeMin = outLog?.overtimeMin ?? 0;
+  const kind: DaySummary["kind"] = inTs(inLog) ? "work" : onLeave ? "leave" : isHoliday ? "holiday" : "none";
+  return { inTs: inLog?.ts ?? null, outTs: outLog?.ts ?? null, breakMin, workMin, lateMin, overtimeMin, kind };
 }
-
-function addDays(day: string, n: number): string {
-  const d = new Date(`${day}T12:00:00+07:00`);
-  d.setDate(d.getDate() + n);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
-}
+function inTs(l: AttendanceLog | undefined): boolean { return !!l; }
 
 export function leaveUsed(leaves: LeaveRequest[], staffId: string, year: number, type: LeaveType): number {
-  return leaves
-    .filter((l) => l.staffId === staffId && l.type === type && l.status !== "rejected" && l.date.startsWith(String(year)))
-    .reduce((a, l) => a + l.days, 0);
+  return leaves.filter((l) => l.staffId === staffId && l.type === type && l.status !== "rejected" && l.date.startsWith(String(year))).reduce((a, l) => a + l.days, 0);
 }
 
-/* ------------------------------ payroll ---------------------------------- */
-const PER_MINUTE = (basic: number) => basic / 25 / 8 / 60;
-
+/* -------------------------------- payroll ------------------------------- */
 export function computeSlip(
-  emp: Employee, month: string,
-  logs: AttendanceLog[], breaks: BreakRec[], leaves: LeaveRequest[],
-  shifts: Shift[], company: Company, bonus = 0, note = "",
+  emp: Employee, month: string, logs: AttendanceLog[], breaks: BreakRec[], leaves: LeaveRequest[],
+  shifts: Shift[], holidays: Holiday[],
 ): Payslip {
-  const s = emp.salary;
-  const workdays = expectedWorkdays(month, company.holidays);
   const days = monthDays(month);
-  let hadir = 0, cuti = 0, libur = 0, terlambat = 0, totalLateMin = 0, lemburMin = 0;
-  for (const day of days) {
-    const sum = daySummary(emp.staffId, day, logs, breaks, leaves, shifts, emp.shiftId, company.holidays);
-    if (sum.inTs) {
-      hadir++;
-      if (sum.lateMin > 0) { terlambat++; totalLateMin += sum.lateMin; }
-      lemburMin += sum.overtimeMin;
-    } else if (sum.kind === "leave") cuti++;
-    else if (sum.kind === "holiday") libur++;
+  let hadir = 0, lateMin = 0, workMin = 0, overtimeMin = 0;
+  for (const d of days) {
+    const s = daySummary(emp.staffId, d, logs, breaks, leaves, shifts, emp.shiftId, holidays);
+    if (s.inTs) { hadir++; lateMin += s.lateMin; workMin += s.workMin; overtimeMin += s.overtimeMin; }
   }
-  const hadirDihitung = Math.min(workdays, hadir + cuti);
-  const gajiPokok = Math.round((s.basic * hadirDihitung) / Math.max(1, workdays));
-  const transport = s.transport * hadir;
-  const meal = s.meal * hadir;
-  const lembur = Math.round((lemburMin / 60) * s.otPerHour);
-  const absenHari = Math.max(0, workdays - hadir - cuti - libur);
-  const potongTelat = Math.round(totalLateMin * PER_MINUTE(s.basic));
-  const potongAbsen = Math.round(absenHari * (s.basic / Math.max(1, workdays)));
-  const bruto = gajiPokok + transport + meal + lembur + bonus;
-  const potongan = potongTelat + potongAbsen;
+  const workdays = monthWorkdays(month, holidays);
+  const attended = days.filter((d) => daySummary(emp.staffId, d, logs, breaks, leaves, shifts, emp.shiftId, holidays).kind !== "none").length;
+  const basicProrated = Math.round(emp.salary.basic * (Math.min(hadir + leaveUsed(leaves, emp.staffId, Number(month.slice(0, 4)), "Tahunan") , workdays) / Math.max(1, workdays)));
+  const allowances = hadir * (emp.salary.transport + emp.salary.meal);
+  const overtimePay = Math.round((overtimeMin / 60) * emp.salary.otPerHour);
+  const lateDeduct = Math.round((lateMin / 60) * (emp.salary.basic / workdays / 8));
+  const absentDays = Math.max(0, workdays - attended);
+  const absentDeduct = Math.round(absentDays * (emp.salary.basic / workdays));
+  const deductions = lateDeduct + absentDeduct;
+  const net = basicProrated + allowances + overtimePay - deductions;
   return {
-    id: uid("slip"), month, staffId: emp.staffId, name: emp.name,
-    department: emp.department, position: emp.position,
-    kerjaHari: workdays, hadir, cuti, libur, terlambat, totalLateMin, lemburMin,
-    gajiPokok, transport, meal, lembur, bonus,
-    potongTelat, potongAbsen, bruto, potongan,
-    net: Math.max(0, bruto - potongan),
-    note, status: "draft", issuedAt: null, issuedBy: null, createdAt: Date.now(),
+    id: `slip-${emp.staffId}-${month}`, staffId: emp.staffId, name: emp.name, month,
+    status: "draft", hadir, terlambat: lateMin > 0 ? days.filter((d) => daySummary(emp.staffId, d, logs, breaks, leaves, shifts, emp.shiftId, holidays).lateMin > 0).length : 0,
+    lateMin, basicProrated, allowances, overtimePay, overtimeMin, bonus: 0, deductions, net,
   };
 }
 
-/* -------------------------------- export --------------------------------- */
-export function buildCsv(logs: AttendanceLog[]): string {
-  const head = "Waktu;StaffID;Nama;Departemen;Tipe;Status;Lat;Lon;JarakM;FaceDelta;Metode;Alasan";
-  const body = logs.map((l) =>
-    [
-      new Date(l.ts).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }),
-      l.staffId, l.name, l.department, l.type, l.status,
-      l.lat.toFixed(6), l.lon.toFixed(6), String(l.distanceM),
-      l.faceDist?.toFixed(3) ?? "", l.method, l.reason ?? "",
-    ].join(";"),
-  );
-  return "\uFEFF" + [head, ...body].join("\n");
+/* ------------------------------ misc helpers ---------------------------- */
+export function readCrashLog(): { ts: number; msg: string } | null {
+  try {
+    const raw = localStorage.getItem(NS + "crashlog");
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
 }
 
-export function downloadTextFile(name: string, content: string, mime = "text/plain;charset=utf-8") {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+export async function shrinkPhoto(dataUrl: string, maxDim: number): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/jpeg", 0.72));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+export function smtpEnvBlock(s: SmtpConfig): string {
+  return `SMTP_HOST=${s.host}\nSMTP_PORT=${s.port}\nSMTP_SECURE=${s.secure}\nSMTP_USER=${s.user}\nSMTP_PASS=${s.pass}\nSMTP_FROM_NAME=${s.fromName}`;
 }

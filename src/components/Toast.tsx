@@ -1,6 +1,4 @@
-/**
- * Toast system + haptic buzz — the feedback layer for every action.
- */
+/** Toast system + haptic buzz — the feedback layer for every action. */
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import { IconAlert, IconCheck, IconSignal, IconX } from "./icons";
 
@@ -8,7 +6,6 @@ export type ToastTone = "ok" | "danger" | "warn" | "info";
 export interface ToastItem { id: number; tone: ToastTone; title: string; body?: string; }
 
 interface ToastApi { push: (tone: ToastTone, title: string, body?: string) => void; }
-
 const Ctx = createContext<ToastApi>({ push: () => undefined });
 export const useToast = () => useContext(Ctx);
 
@@ -43,20 +40,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
       <div className="pointer-events-none fixed inset-x-0 top-3 z-[90] flex flex-col items-center gap-2 px-4">
         {items.map((t) => (
-          <div
-            key={t.id}
-            className={`toast-in pointer-events-auto flex w-full max-w-md items-start gap-2.5 rounded-2xl border px-3.5 py-3 shadow-[0_16px_40px_rgba(23,42,89,0.18)] backdrop-blur ${toneWrap[t.tone]}`}
-          >
+          <div key={t.id} className={`toast-in pointer-events-auto flex w-full max-w-md items-start gap-2.5 rounded-2xl border px-3.5 py-3 shadow-[0_16px_40px_rgba(23,42,89,0.18)] backdrop-blur ${toneWrap[t.tone]}`}>
             <span className="mt-0.5 shrink-0">{toneIcon[t.tone]}</span>
             <div className="min-w-0">
               <p className="font-display text-[14px] leading-tight font-bold">{t.title}</p>
               {t.body && <p className="mt-0.5 text-[12px] leading-snug font-semibold opacity-85">{t.body}</p>}
             </div>
-            <button
-              className="ml-auto shrink-0 cursor-pointer rounded-lg p-1 opacity-60 transition hover:opacity-100"
-              onClick={() => setItems((prev) => prev.filter((x) => x.id !== t.id))}
-              aria-label="Tutup notifikasi"
-            >
+            <button className="ml-auto shrink-0 cursor-pointer rounded-lg p-1 opacity-60 transition hover:opacity-100" onClick={() => setItems((prev) => prev.filter((x) => x.id !== t.id))} aria-label="Tutup notifikasi">
               <IconX size={13} />
             </button>
           </div>

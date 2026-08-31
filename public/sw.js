@@ -1,5 +1,5 @@
 /* Vittoria HR service worker — network-first shell, cache-first assets. */
-const CACHE = "vittoria-hr-v6";
+const CACHE = "vittoria-hr-v7";
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
@@ -16,7 +16,7 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // CDN weights etc. fetch normally
+  if (url.origin !== self.location.origin) return; // CDN weights/tiles fetch normally
 
   if (req.mode === "navigate") {
     e.respondWith(

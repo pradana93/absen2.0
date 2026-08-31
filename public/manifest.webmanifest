@@ -1,7 +1,7 @@
 {
   "name": "Vittoria HR — Absensi Wajah & Geofencing",
   "short_name": "Vittoria HR",
-  "description": "Absensi wajah 128-D dengan geofencing GPS, cuti, penggajian, dan manajemen SDM multi-peran.",
+  "description": "HRIS gudang: absensi wajah + GPS multi-gudang, cuti, penggajian, struktur organisasi, dan Master Data dengan mesin SQL.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F4F6FB",

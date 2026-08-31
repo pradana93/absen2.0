@@ -6,12 +6,9 @@ interface State { error: Error | null; }
 export default class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   state: State = { error: null };
 
-  static getDerivedStateFromError(error: Error): State {
-    return { error };
-  }
+  static getDerivedStateFromError(error: Error): State { return { error }; }
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Vittoria HR crash:", error, info.componentStack);
-    /* keep a forensic breadcrumb for the Master Data integrity panel */
     try {
       localStorage.setItem("vittoria:crashlog", JSON.stringify({
         ts: Date.now(),
@@ -53,7 +50,7 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
               Reset Data Lokal
             </button>
           </div>
-          <p className="mt-4 text-[10.5px] font-bold tracking-wide text-ink-300">Vittoria HR · v6.2</p>
+          <p className="mt-4 text-[10.5px] font-bold tracking-wide text-ink-300">Vittoria HR · v7.0 · SQLite</p>
         </div>
       </div>
     );

@@ -1,67 +1,66 @@
 /**
- * send-mail — Netlify serverless function.
- * Sends transactional email (password-reset links, test mails) via SMTP
- * using nodemailer. Credentials come from Netlify environment variables
- * (preferred) or the request payload (Super Admin config fallback).
+ * Vittoria HR — transactional email (Gmail SMTP via nodemailer).
+ * Deployed automatically alongside the static site; endpoint:
+ *   POST /.netlify/functions/send-mail
  *
- * Required (either source): SMTP_HOST, SMTP_USER, SMTP_PASS
- * Optional: SMTP_PORT (465), SMTP_SECURE ("true"), SMTP_FROM_NAME
+ * Credentials resolution: Netlify env vars first (recommended), then the
+ * request body (Super Admin's in-app SMTP config). Never log the password.
  */
 import nodemailer from "nodemailer";
 
-const json = (status, obj) =>
-  new Response(JSON.stringify(obj), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+const json = (status, body) => ({
+  statusCode: status,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
 
 export default async (req) => {
-  if (req.method !== "POST") return json(405, { error: "Method not allowed" });
+  if (req.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
 
-  let body;
+  let payload;
   try {
-    body = await req.json();
+    payload = JSON.parse(req.body ?? "{}");
   } catch {
-    return json(400, { error: "Invalid JSON body" });
+    return json(400, { error: "Body JSON tidak valid." });
   }
 
-  const { to, subject, html, text, config } = body ?? {};
-  if (!to || !subject) return json(400, { error: "Fields 'to' and 'subject' are required" });
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(to))) return json(400, { error: "Invalid recipient address" });
-  if (String(subject).length > 200) return json(400, { error: "Subject too long" });
+  const { to, subject, html, text, config = {} } = payload;
+  if (!to || !subject) return json(400, { error: "Field 'to' dan 'subject' wajib." });
 
-  const env = process.env;
-  const host = env.SMTP_HOST || config?.host;
-  const port = Number(env.SMTP_PORT || config?.port || 465);
-  const secure = env.SMTP_SECURE ? env.SMTP_SECURE === "true" : config?.secure ?? port === 465;
-  const user = env.SMTP_USER || config?.user;
-  const pass = env.SMTP_PASS || config?.pass;
-  const fromName = env.SMTP_FROM_NAME || config?.fromName || "Vittoria HR";
+  const host = process.env.SMTP_HOST || config.host || "smtp.gmail.com";
+  const port = Number(process.env.SMTP_PORT || config.port || 465);
+  const secure = (process.env.SMTP_SECURE ?? String(config.secure ?? "true")) !== "false";
+  const user = process.env.SMTP_USER || config.user;
+  const pass = process.env.SMTP_PASS || config.pass;
+  const fromName = process.env.SMTP_FROM_NAME || config.fromName || "Vittoria HR";
 
-  if (!host || !user || !pass) {
-    return json(503, {
-      error: "SMTP not configured. Set SMTP_HOST / SMTP_USER / SMTP_PASS in Netlify environment variables, or enable SMTP in Super Admin → Master Data.",
-    });
+  if (!user || !pass) {
+    return json(400, { error: "SMTP belum dikonfigurasi (isi di Master Data → Email & SMTP, atau set env vars)." });
   }
 
   try {
     const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
+      host, port, secure,
       auth: { user, pass },
-      connectionTimeout: 9000,
-      greetingTimeout: 9000,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 12_000,
     });
     await transporter.sendMail({
-      from: `"${String(fromName).replace(/"/g, "")}" <${user}>`,
+      from: `"${fromName}" <${user}>`,
       to,
       subject,
-      text,
-      html,
+      text: text || subject,
+      html: html || undefined,
     });
-    return json(200, { ok: true, via: env.SMTP_HOST ? "env" : "config" });
+    return json(200, { ok: true, via: `${host}:${port}` });
   } catch (e) {
-    return json(502, { error: `SMTP send failed: ${String(e?.message ?? e)}` });
+    const msg = String(e?.message ?? e);
+    // strip credentials if nodemailer echoes them
+    const safe = msg.replace(pass, "••••").replace(user, "[user]");
+    console.error("send-mail failed:", safe);
+    return json(500, { error: `Gagal mengirim: ${safe.slice(0, 220)}` });
   }
 };
+
+export const config = { path: "/.netlify/functions/send-mail" };
