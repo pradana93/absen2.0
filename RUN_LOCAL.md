@@ -162,3 +162,38 @@ Tenang — yang ter-wipe hanya *sandbox*, bukan repo GitHub Anda:
 2. Data tenant: impor ulang JSON dari **Master Data** (atau dari URL hosting yang tetap hidup)
 
 Selama kode sudah di-push ke GitHub dan (opsional) di-deploy ke Netlify/Cloudflare/Vercel, app ini milik Anda sepenuhnya — tidak bergantung pada preview mana pun.
+
+---
+
+## 5. Email Sungguhan via Gmail SMTP (Reset Kata Sandi)
+
+Arsitektur: browser **tidak bisa** mengirim SMTP langsung. Repo ini menyertakan
+`netlify/functions/send-mail.mjs` — serverless function gratis dari Netlify yang
+mengirim email dengan `nodemailer`. Saat di-deploy ke Netlify, function ikut
+ter-deploy otomatis dan URL `/.netlify/functions/send-mail` langsung hidup.
+
+### Langkah
+
+1. **Buat Gmail khusus absensi** (mis. `absensi.vittoria@gmail.com`).
+2. Aktifkan **2-Step Verification** → Google Account → Security.
+3. Buat **App Password** (Security → App passwords → Mail → Other “Vittoria HR”) — dapat 16 karakter. Sandi Gmail biasa *ditolak* server sejak 2022.
+4. Login sebagai **Super Admin → Master Data → Email & SMTP**:
+   - Nyalakan toggle, isi server `smtp.gmail.com`, port `465` (SSL), akun Gmail, dan App Password
+   - Klik **Kirim Tes** — jika sampai, konfigurasi benar 🎉
+   - **Simpan Konfigurasi**
+5. **(Direkomendasikan)** Klik **Salin Env Vars** → tempel di Netlify:
+   *Site settings → Environment variables* → redeploy. Function membaca env vars
+   lebih dulu, sehingga kredensial tidak perlu tersimpan di browser/perangkat.
+
+### Perilaku
+
+| Kondisi | Hasil |
+|---|---|
+| SMTP aktif + function ter-deploy | Email reset **sungguhan** tiba di inbox karyawan (cek Spam) |
+| SMTP aktif tapi function gagal | Otomatis fallback ke inbox simulasi + tercatat di audit |
+| SMTP nonaktif | Inbox simulasi di layar login (untuk demo/dev) |
+
+Setiap pengiriman tercatat di audit (`AUTH_PW_RESET_SENT`, `SMTP_TEST_OK/FAIL`).
+
+> Catatan dev lokal: `npm run dev` tidak menjalankan Netlify Function — gunakan
+> `netlify login && netlify link && netlify dev` bila ingin menguji email di lokal.
