@@ -11,6 +11,7 @@ import { todayKey } from "./lib/format";
 import { Chip, InitialsAvatar } from "./components/bits";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ToastProvider, useToast } from "./components/Toast";
+import FaceEnrollGate from "./components/FaceEnrollGate";
 import OnboardingTour from "./components/OnboardingTour";
 import LoginView from "./views/LoginView";
 import HomeView from "./views/HomeView";
@@ -238,6 +239,10 @@ function Shell() {
   const [initialType, setInitialType] = useState<AttendanceType>("IN");
   const mainRef = useRef<HTMLElement>(null);
 
+  /* first-login face enrollment gate (dismissed per-user on save or skip) */
+  const [faceDone, setFaceDone] = useState(false);
+  useEffect(() => setFaceDone(false), [session?.staffId]);
+
   /* first-login onboarding tour */
   const [tour, setTour] = useState(false);
   useEffect(() => {
@@ -328,6 +333,12 @@ function Shell() {
   };
 
   if (!session) return <LoginView />;
+
+  /* first login: capture base photo before entering (HR skipped it at creation) */
+  const needsFace = !session.descriptor && !session.hash;
+  if (needsFace && !faceDone) {
+    return <FaceEnrollGate onDone={() => setFaceDone(true)} />;
+  }
 
   /* maintenance mode — admins keep access */
   const isAdminRole = role === "superadmin" || role === "companyadmin";
