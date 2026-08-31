@@ -4,7 +4,7 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { useApp } from "../lib/store";
-import { LEAVE_QUOTAS, LEAVE_TYPES, LeaveRequest, LeaveType, leaveUsed } from "../lib/database";
+import { LEAVE_TYPES, LeaveRequest, LeaveType, leaveUsed } from "../lib/database";
 import { todayKey, uid, wibShortDate } from "../lib/format";
 import { useToast } from "../components/Toast";
 import { Banner, Chip, SectionLabel, Tone } from "../components/bits";
@@ -13,7 +13,7 @@ import { IconBriefcase, IconCheck, IconDoc, IconPlus, IconX } from "../component
 const toneFor: Record<LeaveType, Tone> = { Tahunan: "sun", Sakit: "sky", Darurat: "coral", Melahirkan: "grape" };
 
 export default function CutiView() {
-  const { session, employees, leaves, addLeave, decideLeave, audit } = useApp();
+  const { session, employees, leaves, leaveQuotas, addLeave, decideLeave, audit } = useApp();
   const toast = useToast();
   const me = session!;
   const isManager = me.role === "manager";
@@ -34,7 +34,7 @@ export default function CutiView() {
   const hrQueue = useMemo(() => leaves.filter((l) => l.status === "pending_hr").sort((a, b) => b.createdAt - a.createdAt), [leaves]);
   const allRequests = useMemo(() => (isHR || isManager ? [...leaves].sort((a, b) => b.createdAt - a.createdAt) : []), [leaves, isHR, isManager]);
 
-  const remaining = (t: LeaveType) => Math.max(0, LEAVE_QUOTAS[t] - leaveUsed(leaves, me.staffId, year, t));
+  const remaining = (t: LeaveType) => Math.max(0, leaveQuotas[t] - leaveUsed(leaves, me.staffId, year, t));
 
   const onFile = (f: File | undefined) => {
     if (!f) return;
@@ -135,10 +135,10 @@ export default function CutiView() {
           <div key={t} className="card card-press p-3.5">
             <div className="flex items-center justify-between">
               <Chip tone={toneFor[t]}>{t.toUpperCase()}</Chip>
-              <span className="font-display text-[17px] font-extrabold text-ink-900">{remaining(t)}<span className="text-[11px] text-ink-400">/{LEAVE_QUOTAS[t]}</span></span>
+              <span className="font-display text-[17px] font-extrabold text-ink-900">{remaining(t)}<span className="text-[11px] text-ink-400">/{leaveQuotas[t]}</span></span>
             </div>
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink-100">
-              <div className="bar-grow-x h-full rounded-full bg-sun-500" style={{ width: `${(remaining(t) / LEAVE_QUOTAS[t]) * 100}%` }} />
+              <div className="bar-grow-x h-full rounded-full bg-sun-500" style={{ width: `${(remaining(t) / Math.max(1, leaveQuotas[t])) * 100}%` }} />
             </div>
           </div>
         ))}
