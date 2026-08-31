@@ -115,10 +115,7 @@ export default function EmployeesView() {
       shiftId: shift,
       siteId: role === "superadmin" || role === "companyadmin" ? null : fSite,
       status: "active",
-      salary: {
-        basic: role === "employee" ? 5_200_000 : role === "manager" ? 8_000_000 : 9_500_000,
-        transport: 20_000, meal: 15_000, otPerHour: role === "employee" ? 30_000 : 45_000,
-      },
+      salary: { ...salaryDefaults[role] },
       // base photo dikosongkan — karyawan mengambilnya sendiri saat login pertama
       photo: null, descriptor: null, hash: null,
       createdAt: Date.now(),
@@ -409,7 +406,7 @@ export default function EmployeesView() {
               <div>
                 <label className="label">Departemen</label>
                 <select className="input !py-2.5 text-sm" value={eForm.department} onChange={(e) => setEForm({ ...eForm, department: e.target.value })}>
-                  {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                  {departments.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
               <div>
