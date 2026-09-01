@@ -1,8 +1,9 @@
 /**
- * Cloud bridge client (Fase 2) — talks to the Netlify Function that fronts
- * the Netlify DB (Postgres). The embedded SQLite engine stays as the instant
- * local cache; when the cloud is reachable it becomes the shared source of
- * truth for the whole team.
+ * Cloud bridge client (Fase 2 · v3: live sync + presence).
+ *
+ * Talks to the Netlify Function fronting the Netlify DB (Postgres). The
+ * embedded SQLite engine stays as the instant local cache; when the cloud is
+ * reachable it becomes the shared source of truth for the whole team.
  *
  * Wire format: prop-shaped objects (camelCase, real JSON/booleans) — the
  * function owns the column mapping, so the client stays engine-agnostic.
@@ -45,16 +46,18 @@ async function post(body: unknown): Promise<Record<string, unknown>> {
   return j;
 }
 
-/* --------------------------------- ops ----------------------------------- */
+/* --------------------------------- pull ---------------------------------- */
 export interface PullResult {
   ok: boolean; ready: boolean; hasData: boolean; rows: number;
   counts: Record<string, number>; data: Record<string, unknown[]>; version: string | null;
+  error?: string;
 }
 
-export async function cloudPull(): Promise<PullResult> {
+/** Full pull (no keys) or targeted pull of changed collections. */
+export async function cloudPull(keys?: string[]): Promise<PullResult> {
   setCloudStatus("connecting");
   try {
-    const j = await post({ op: "pull" });
+    const j = await post(keys?.length ? { op: "pull", keys } : { op: "pull" });
     setCloudStatus("on");
     return {
       ok: true,
@@ -65,9 +68,9 @@ export async function cloudPull(): Promise<PullResult> {
       data: (j.data as Record<string, unknown[]>) ?? {},
       version: (j.version as string) ?? null,
     };
-  } catch {
+  } catch (e) {
     setCloudStatus("off");
-    return { ok: false, ready: false, hasData: false, rows: 0, counts: {}, data: {}, version: null };
+    return { ok: false, ready: false, hasData: false, rows: 0, counts: {}, data: {}, version: null, error: String((e as Error)?.message ?? e) };
   }
 }
 
@@ -82,7 +85,112 @@ export async function cloudInit(): Promise<{ ok: boolean; error?: string }> {
   }
 }
 
-/** Debounced per-collection push; the local save already happened. */
+/* ------------------------------ stats + revs ------------------------------ */
+export interface PresenceRow {
+  deviceId: string; staffId: string | null; name: string; role: string;
+  siteId: string | null; siteName: string | null; lastSeen: number;
+}
+export interface StatsResult {
+  ok: boolean; rows: number; tables: number; version: string | null;
+  revs: Record<string, string>; presenceActive: PresenceRow[]; serverVersion: string;
+}
+
+/** Cheap health read: row counts, per-table revisions, active presence. */
+export async function cloudStats(): Promise<StatsResult | null> {
+  try {
+    const j = await post({ op: "stats" });
+    setCloudStatus("on");
+    return {
+      ok: true,
+      rows: Number(j.rows ?? 0),
+      tables: Number(j.tables ?? 0),
+      version: (j.version as string) ?? null,
+      revs: (j.revs as Record<string, string>) ?? {},
+      presenceActive: ((j.presence_active as unknown[]) ?? []) as PresenceRow[],
+      serverVersion: String(j.server_version ?? ""),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/* --------------------------------- ping ----------------------------------- */
+export interface PingResult {
+  ok: boolean; serverVersion?: string; schemaReady?: boolean; tables?: number;
+  missing?: string[]; rows?: number; serverMs?: number; clientMs?: number; error?: string;
+}
+
+/** End-to-end health check: browser → function → Postgres → back. */
+export async function cloudPing(): Promise<PingResult> {
+  const t0 = performance.now();
+  try {
+    const j = await post({ op: "ping" });
+    setCloudStatus("on");
+    return {
+      ok: true,
+      serverVersion: String(j.server_version ?? ""),
+      schemaReady: Boolean(j.schema_ready),
+      tables: Number(j.tables ?? 0),
+      missing: (j.missing as string[]) ?? [],
+      rows: Number(j.rows ?? 0),
+      serverMs: Number(j.server_ms ?? 0),
+      clientMs: Math.round(performance.now() - t0),
+    };
+  } catch (e) {
+    setCloudStatus("error");
+    return { ok: false, error: String((e as Error)?.message ?? e), clientMs: Math.round(performance.now() - t0) };
+  }
+}
+
+/* -------------------------------- heartbeat ------------------------------- */
+export function heartbeat(p: {
+  deviceId: string; staffId: string; name: string; role: string;
+  siteId: string | null; siteName: string | null;
+}): Promise<PresenceRow[] | null> {
+  if (!active) return Promise.resolve(null);
+  return post({ op: "presence", ...p, ua: navigator.userAgent })
+    .then((j) => {
+      setCloudStatus("on");
+      return ((j.presence_active as unknown[]) ?? []) as PresenceRow[];
+    })
+    .catch(() => null);
+}
+
+/* ----------------------------- offline retry ------------------------------ */
+const QUEUE_KEY = "vittoria:cloudqueue";
+const pendingRows = new Map<string, unknown[]>();
+
+function enqueue(key: string, rows: unknown[]) {
+  pendingRows.set(key, rows);
+  try {
+    const q = JSON.parse(localStorage.getItem(QUEUE_KEY) ?? "[]") as string[];
+    if (!q.includes(key)) q.push(key);
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(q.slice(-20)));
+  } catch { /* private mode — memory-only queue */ }
+}
+
+/** Retry any queued collections after connectivity returns. */
+export async function flushQueue(): Promise<void> {
+  if (!active) return;
+  let queued: string[] = [];
+  try { queued = JSON.parse(localStorage.getItem(QUEUE_KEY) ?? "[]") as string[]; } catch { return; }
+  if (!queued.length) return;
+  const still: string[] = [];
+  for (const key of queued) {
+    const rows = pendingRows.get(key);
+    if (!rows) continue; // page reloaded — next edit of that collection re-syncs it
+    try {
+      await post({ op: "sync", key, rows });
+      pendingRows.delete(key);
+    } catch {
+      still.push(key);
+    }
+  }
+  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(still)); } catch { /* noop */ }
+  if (!still.length) { try { window.dispatchEvent(new Event("vittoria:cloud-synced")); } catch { /* noop */ } }
+}
+
+/* ---------------------------- debounced writes ---------------------------- */
 const timers = new Map<string, number>();
 export function queueCloudSync(key: string, rows: unknown): void {
   if (!active) return;
@@ -93,6 +201,7 @@ export function queueCloudSync(key: string, rows: unknown): void {
     void post({ op: "sync", key, rows })
       .then(() => { if (status !== "on") setCloudStatus("on"); try { window.dispatchEvent(new Event("vittoria:cloud-synced")); } catch { /* noop */ } })
       .catch(() => {
+        enqueue(key, rows as unknown[]);
         setCloudStatus("error");
         try { window.dispatchEvent(new Event("vittoria:cloud-error")); } catch { /* noop */ }
       });
@@ -101,52 +210,14 @@ export function queueCloudSync(key: string, rows: unknown): void {
 
 export function cloudRemove(key: string, ids: string[]): void {
   if (!active || ids.length === 0) return;
-  void post({ op: "remove", key, ids }).catch(() => {
-    setCloudStatus("error");
-    try { window.dispatchEvent(new Event("vittoria:cloud-error")); } catch { /* noop */ }
-  });
+  void post({ op: "remove", key, ids })
+    .then(() => { try { window.dispatchEvent(new Event("vittoria:cloud-synced")); } catch { /* noop */ } })
+    .catch(() => { setCloudStatus("error"); try { window.dispatchEvent(new Event("vittoria:cloud-error")); } catch { /* noop */ } });
 }
 
 export function cloudClear(key: string): void {
   if (!active) return;
-  void post({ op: "clear", key }).catch(() => {
-    setCloudStatus("error");
-    try { window.dispatchEvent(new Event("vittoria:cloud-error")); } catch { /* noop */ }
-  });
-}
-
-/* --------------------------------- ping ---------------------------------- */
-export interface PingResult {
-  ok: boolean;
-  serverVersion?: string;
-  schemaReady?: boolean;
-  tables?: number;
-  missing?: string[];
-  rows?: number;
-  serverMs?: number;
-  clientMs?: number;
-  error?: string;
-}
-
-/** End-to-end health check: browser → function → Postgres → back. */
-export async function cloudPing(): Promise<PingResult> {
-  const t0 = performance.now();
-  try {
-    const j = await post({ op: "ping" });
-    const clientMs = Math.round(performance.now() - t0);
-    if (status !== "on") setCloudStatus("on");
-    return {
-      ok: true,
-      serverVersion: String(j.server_version ?? ""),
-      schemaReady: Boolean(j.schema_ready),
-      tables: Number(j.tables ?? 0),
-      missing: (j.missing as string[]) ?? [],
-      rows: Number(j.rows ?? 0),
-      serverMs: Number(j.server_ms ?? 0),
-      clientMs,
-    };
-  } catch (e) {
-    setCloudStatus("error");
-    return { ok: false, error: String((e as Error)?.message ?? e), clientMs: Math.round(performance.now() - t0) };
-  }
+  void post({ op: "clear", key })
+    .then(() => { try { window.dispatchEvent(new Event("vittoria:cloud-synced")); } catch { /* noop */ } })
+    .catch(() => { setCloudStatus("error"); try { window.dispatchEvent(new Event("vittoria:cloud-error")); } catch { /* noop */ } });
 }

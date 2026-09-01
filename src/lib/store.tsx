@@ -32,6 +32,9 @@ export interface CloudMeta {
   counts: Record<string, number>;
   version: string | null;
   lastSync: number | null;
+  reason: string | null;
+  serverVersion: string | null;
+  presenceActive: number;
 }
 
 interface AppState {
@@ -47,6 +50,7 @@ interface AppState {
   sql: SqlMeta; refreshSql: () => void; runSql: (q: string) => { ok: true; result: SqlResult } | { ok: false; error: string };
   exportSqlFile: () => void; vacuumSql: () => void;
   cloud: CloudMeta;
+  presence: import("./sql/cloud").PresenceRow[];
   cloudInitNow: () => Promise<{ ok: boolean; error?: string }>;
   cloudPullNow: () => Promise<boolean>;
   cloudPing: () => Promise<import("./sql/cloud").PingResult>;
@@ -161,8 +165,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [engine, setEngine] = useState<EngineStatus>("boot");
   const [geo, setGeo] = useState<GeoReading | null>(null);
   const [sql, setSql] = useState<SqlMeta>({ status: "boot", version: "—", sizeKB: 0, tables: 0, rows: 0 });
-  const [cloud, setCloud] = useState<CloudMeta>({ status: "off", ready: false, rows: 0, counts: {}, version: null, lastSync: null });
+  const [cloud, setCloud] = useState<CloudMeta>({ status: "off", ready: false, rows: 0, counts: {}, version: null, lastSync: null, reason: null, serverVersion: null, presenceActive: 0 });
+  const [presence, setPresence] = useState<import("./sql/cloud").PresenceRow[]>([]);
   const cloudHadDataRef = useRef(false);
+  const revsRef = useRef<Record<string, string>>({});
   const [session, setSession] = useState<SessionState | null>(() => {
     const s = db.loadSession();
     if (!s) return null;
@@ -262,47 +268,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const cl = await import("./sql/cloud");
       if (disposed) return;
       cl.onCloudStatus((s) => setCloud((prev) => ({ ...prev, status: s })));
-      const pull = await cl.cloudPull();
+      /* probe first: cheap stats tells us *why* we're local if it fails */
+      const st = await cl.cloudStats();
       if (disposed) return;
-      if (pull.ok) {
-        cl.setCloudActive(true);
-        setCloudWrites(true);
-        cloudHadDataRef.current = pull.hasData;
-        setCloud({ status: "on", ready: pull.ready, rows: pull.rows, counts: pull.counts, version: pull.version, lastSync: Date.now() });
-        if (pull.ready && pull.hasData) {
-          const d = pull.data;
-          if ((d.employees as Employee[]).length) setEmployees(d.employees as Employee[]);
-          if ((d.logs as AttendanceLog[]).length) setLogs(d.logs as AttendanceLog[]);
-          if ((d.leaves as LeaveRequest[]).length) setLeaves(d.leaves as LeaveRequest[]);
-          if ((d.org as OrgNode[]).length) setOrg(d.org as OrgNode[]);
-          if ((d.board as BoardPost[]).length) setBoard(d.board as BoardPost[]);
-          if ((d.audits as AuditLog[]).length) setAudits(d.audits as AuditLog[]);
-          if ((d.notifs as Notif[]).length) setNotifs(d.notifs as Notif[]);
-          if ((d.breaks as BreakRec[]).length) setBreaks(d.breaks as BreakRec[]);
-          if ((d.shifts as Shift[]).length) setShifts(d.shifts as Shift[]);
-          if ((d.sites as Site[]).length) setSites(d.sites as Site[]);
-          if ((d.company as Company[]).length) setCompany((d.company as Company[])[0]);
-          if ((d.departments as { name: string }[]).length) setDepartments((d.departments as { name: string }[]).map((x) => x.name));
-          if ((d.quotas as { type: LeaveType; days: number }[]).length) {
-            setLeaveQuotas((prev) => {
-              const next = { ...prev };
-              (d.quotas as { type: LeaveType; days: number }[]).forEach((x) => { next[x.type] = x.days; });
-              return next;
-            });
-          }
-          if ((d.salarydefaults as ({ role: Role } & SalaryStructure)[]).length) {
-            setSalaryDefaults((prev) => {
-              const next = { ...prev };
-              (d.salarydefaults as ({ role: Role } & SalaryStructure)[]).forEach((x) => {
-                const { role, ...rest } = x;
-                next[role] = rest as SalaryStructure;
-              });
-              return next;
-            });
-          }
-        }
+      if (!st) {
+        const isLocal = /localhost|127\.0\.0\.1/.test(window.location.hostname);
+        setCloud((prev) => ({
+          ...prev, status: "off",
+          reason: isLocal
+            ? "Dibuka dari localhost — fungsi cloud hanya hidup di URL Netlify. Untuk dev lokal pakai `netlify dev`."
+            : "Fungsi cloud tidak terjangkau — deploy ulang site & pastikan Netlify DB ter-link (env DATABASE_URL ada).",
+        }));
       } else {
-        setCloud((prev) => ({ ...prev, status: "off" }));
+        revsRef.current = st.revs;
+        const pull = await cl.cloudPull();
+        if (disposed) return;
+        if (pull.ok) {
+          cl.setCloudActive(true);
+          setCloudWrites(true);
+          cloudHadDataRef.current = pull.hasData;
+          setCloud({
+            status: "on", ready: pull.ready, rows: st.rows, counts: pull.counts, version: pull.version,
+            lastSync: Date.now(), reason: null, serverVersion: st.serverVersion || null, presenceActive: st.presenceActive.length,
+          });
+          setPresence(st.presenceActive);
+          if (pull.ready && pull.hasData) applyCloudData(pull.data);
+          void cl.flushQueue();
+        } else {
+          setCloud((prev) => ({ ...prev, status: "error", reason: `Pull gagal: ${pull.error ?? "periksa log fungsi di Netlify."}` }));
+        }
       }
     });
     const onPersisted = () => { if (sqlEng) setSql(sqlEng.sqlStats()); };
@@ -356,6 +350,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ["resets", db.loadResets() as unknown[]],
   ], []);
 
+  /** Apply pulled cloud rows to React state (safe for partial pulls). */
+  const applyCloudData = useCallback((d: Record<string, unknown[]>) => {
+    if ((d.employees as Employee[] | undefined)?.length) setEmployees(d.employees as Employee[]);
+    if ((d.logs as AttendanceLog[] | undefined)?.length) setLogs(d.logs as AttendanceLog[]);
+    if ((d.leaves as LeaveRequest[] | undefined)?.length) setLeaves(d.leaves as LeaveRequest[]);
+    if ((d.org as OrgNode[] | undefined)?.length) setOrg(d.org as OrgNode[]);
+    if ((d.board as BoardPost[] | undefined)?.length) setBoard(d.board as BoardPost[]);
+    if ((d.audits as AuditLog[] | undefined)?.length) setAudits(d.audits as AuditLog[]);
+    if ((d.notifs as Notif[] | undefined)?.length) setNotifs(d.notifs as Notif[]);
+    if ((d.breaks as BreakRec[] | undefined)?.length) setBreaks(d.breaks as BreakRec[]);
+    if ((d.shifts as Shift[] | undefined)?.length) setShifts(d.shifts as Shift[]);
+    if ((d.sites as Site[] | undefined)?.length) setSites(d.sites as Site[]);
+    if ((d.company as Company[] | undefined)?.length) setCompany((d.company as Company[])[0]);
+    if ((d.departments as { name: string }[] | undefined)?.length) setDepartments((d.departments as { name: string }[]).map((x) => x.name));
+    if ((d.quotas as { type: LeaveType; days: number }[] | undefined)?.length) {
+      setLeaveQuotas((prev) => {
+        const next = { ...prev };
+        (d.quotas as { type: LeaveType; days: number }[]).forEach((x) => { next[x.type] = x.days; });
+        return next;
+      });
+    }
+    if ((d.salarydefaults as ({ role: Role } & SalaryStructure)[] | undefined)?.length) {
+      setSalaryDefaults((prev) => {
+        const next = { ...prev };
+        (d.salarydefaults as ({ role: Role } & SalaryStructure)[]).forEach((x) => {
+          const { role, ...rest } = x;
+          next[role] = rest as SalaryStructure;
+        });
+        return next;
+      });
+    }
+  }, []);
+
   /** Create the schema in the Netlify DB; upload local data if the DB was empty. */
   const cloudInitNow = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
     const cl = await import("./sql/cloud");
@@ -373,32 +400,76 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /** Manual re-pull: cloud wins, local caches are refreshed underneath. */
   const cloudPullNow = useCallback(async (): Promise<boolean> => {
     const cl = await import("./sql/cloud");
-    const pull = await cl.cloudPull();
+    const [pull, st] = await Promise.all([cl.cloudPull(), cl.cloudStats()]);
     if (!pull.ok) return false;
     cl.setCloudActive(true);
     setCloudWrites(true);
     cloudHadDataRef.current = pull.hasData;
-    setCloud({ status: "on", ready: pull.ready, rows: pull.rows, counts: pull.counts, version: pull.version, lastSync: Date.now() });
-    if (pull.ready && pull.hasData) {
-      const d = pull.data;
-      if ((d.employees as Employee[]).length) setEmployees(d.employees as Employee[]);
-      if ((d.logs as AttendanceLog[]).length) setLogs(d.logs as AttendanceLog[]);
-      if ((d.leaves as LeaveRequest[]).length) setLeaves(d.leaves as LeaveRequest[]);
-      if ((d.org as OrgNode[]).length) setOrg(d.org as OrgNode[]);
-      if ((d.board as BoardPost[]).length) setBoard(d.board as BoardPost[]);
-      if ((d.audits as AuditLog[]).length) setAudits(d.audits as AuditLog[]);
-      if ((d.notifs as Notif[]).length) setNotifs(d.notifs as Notif[]);
-      if ((d.breaks as BreakRec[]).length) setBreaks(d.breaks as BreakRec[]);
-      if ((d.shifts as Shift[]).length) setShifts(d.shifts as Shift[]);
-      if ((d.sites as Site[]).length) setSites(d.sites as Site[]);
-      if ((d.company as Company[]).length) setCompany((d.company as Company[])[0]);
-      if ((d.departments as { name: string }[]).length) setDepartments((d.departments as { name: string }[]).map((x) => x.name));
-    }
+    if (st) revsRef.current = st.revs;
+    setCloud({
+      status: "on", ready: pull.ready, rows: st?.rows ?? pull.rows, counts: pull.counts, version: pull.version,
+      lastSync: Date.now(), reason: null, serverVersion: st?.serverVersion ?? null, presenceActive: st?.presenceActive.length ?? 0,
+    });
+    if (st) setPresence(st.presenceActive);
+    if (pull.ready && pull.hasData) applyCloudData(pull.data);
+    void cl.flushQueue();
     return true;
-  }, []);
+  }, [applyCloudData]);
 
   /** End-to-end health check against the Netlify DB. */
   const cloudPing = useCallback(() => import("./sql/cloud").then((m) => m.cloudPing()), []);
+
+  /* live sync ticker: poll revisions → pull only changed tables; refresh presence */
+  useEffect(() => {
+    const SYNCABLE = ["company", "sites", "employees", "logs", "leaves", "shifts", "org", "board", "departments", "quotas", "salarydefaults", "audits", "notifs", "breaks", "resets"];
+    const statsIv = window.setInterval(async () => {
+      const cl = await import("./sql/cloud");
+      if (!cl.cloudActive()) return;
+      const st = await cl.cloudStats();
+      if (!st) return;
+      setPresence(st.presenceActive);
+      setCloud((prev) => ({ ...prev, rows: st.rows, serverVersion: st.serverVersion || prev.serverVersion, presenceActive: st.presenceActive.length, reason: null }));
+      const prevRevs = revsRef.current;
+      const changed = Object.keys(st.revs).filter((k) => st.revs[k] !== prevRevs[k]);
+      const removed = Object.keys(prevRevs).filter((k) => !(k in st.revs));
+      const diff = [...new Set([...changed, ...removed])].filter((k) => SYNCABLE.includes(k));
+      revsRef.current = st.revs;
+      if (diff.length) {
+        const pull = await cl.cloudPull(diff);
+        if (pull.ok) {
+          applyCloudData(pull.data);
+          setCloud((prev) => ({ ...prev, lastSync: Date.now(), counts: { ...prev.counts, ...pull.counts } }));
+          try { window.dispatchEvent(new Event("vittoria:cloud-synced")); } catch { /* noop */ }
+        }
+      }
+      void cl.flushQueue();
+    }, 20_000);
+    return () => window.clearInterval(statsIv);
+  }, [applyCloudData]);
+
+  /* presence heartbeat — announces this device every 45s while logged in */
+  useEffect(() => {
+    if (!sessionRef.current) return;
+    const beat = () => {
+      const s = sessionRef.current;
+      if (!s) return;
+      const emp = employeesRef.current.find((e) => e.staffId === s.staffId);
+      void import("./sql/cloud").then((cl) => {
+        if (!cl.cloudActive()) return null;
+        return cl.heartbeat({
+          deviceId: getDeviceId(),
+          staffId: s.staffId,
+          name: emp?.name ?? "…",
+          role: emp?.role ?? "employee",
+          siteId: emp?.siteId ?? null,
+          siteName: sitesRef.current.find((x) => x.id === (emp?.siteId ?? null))?.shortName ?? null,
+        });
+      }).then((rows) => { if (rows) setPresence(rows); });
+    };
+    beat();
+    const iv = window.setInterval(beat, 45_000);
+    return () => window.clearInterval(iv);
+  }, [session?.staffId]);
 
   /* live GPS */
   useEffect(() => {
@@ -817,7 +888,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     shifts, org, siteOrg, board, audits, notifs, breaks, payslips, settings, smtp,
     engine, geo, fence, session: sessionEmployee, tokenExp: session?.accessExp ?? 0,
     sql, refreshSql, runSql, exportSqlFile, vacuumSql,
-    cloud, cloudInitNow, cloudPullNow, cloudPing,
+    cloud, presence, cloudInitNow, cloudPullNow, cloudPing,
     login, logout, importIdentity, switchSite,
     addEmployee, updateEmployee, removeEmployee, unbindDevice,
     addLog, clearLogs,
