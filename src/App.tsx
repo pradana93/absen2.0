@@ -183,7 +183,7 @@ function DbStatusPill() {
               {row("Perangkat online", String(cloud.presenceActive || presence.length), true)}
               {row("Sinkron terakhir", cloud.lastSync ? wibTime(new Date(cloud.lastSync)) : "—")}
             </div>
-            {mode !== "local" && (
+            {mode === "cloud" && (
               <button
                 className="btn-sun mt-3 w-full !py-2.5 !text-[12.5px]"
                 onClick={async () => {
@@ -196,7 +196,22 @@ function DbStatusPill() {
               </button>
             )}
             {mode === "error" && (
-              <button className="btn-ghost mt-2 w-full !py-2 !text-[12px]" onClick={() => window.location.reload()}>Muat Ulang</button>
+              <div className="mt-2 space-y-2">
+                {(() => {
+                  const m = window.location.hostname.match(/^([^.]+)\.netlify\.app$/);
+                  if (!m) return null;
+                  return (
+                    <a
+                      href={`https://app.netlify.com/sites/${m[1]}/configuration/environment-variables`}
+                      target="_blank" rel="noreferrer"
+                      className="btn-sun w-full !py-2.5 !text-[12.5px]"
+                    >
+                      <IconArrowRight size={13} /> Buka Environment Variables ↗
+                    </a>
+                  );
+                })()}
+                <button className="btn-ghost w-full !py-2 !text-[12px]" onClick={() => window.location.reload()}>Muat Ulang</button>
+              </div>
             )}
             <p className="mt-2 text-center text-[9.5px] font-bold text-ink-300">Detail lengkap: Master Data → Cloud</p>
           </div>

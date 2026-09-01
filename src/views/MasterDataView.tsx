@@ -773,9 +773,33 @@ export default function MasterDataView() {
                     </div>
                   )}
                   {ping && !ping.ok && (
-                    <p className="rounded-lg bg-danger-100 px-3 py-2 text-[10.5px] leading-relaxed font-bold text-danger-600">
-                      ✕ Gagal setelah {ping.clientMs} ms — {ping.error}. Lihat petunjuk merah pada langkah 2–3 di atas.
-                    </p>
+                    <div className="space-y-2">
+                      <p className="rounded-lg bg-danger-100 px-3 py-2 text-[10.5px] leading-relaxed font-bold text-danger-600">
+                        ✕ Gagal setelah {ping.clientMs} ms — {ping.error}. Lihat petunjuk merah pada langkah 2–3 di atas.
+                      </p>
+                      {(() => {
+                        const m = window.location.hostname.match(/^([^.]+)\.netlify\.app$/);
+                        if (!m) return null;
+                        return (
+                          <a
+                            href={`https://app.netlify.com/sites/${m[1]}/configuration/environment-variables`}
+                            target="_blank" rel="noreferrer"
+                            className="btn-sun w-full !py-2.5 !text-[12.5px]"
+                          >
+                            <IconArrowRight size={14} /> Buka Environment Variables di Netlify ↗
+                          </a>
+                        );
+                      })()}
+                      {/DATABASE_URL/i.test(String(ping.error ?? "")) && (
+                        <div className="rounded-lg border border-sky-300 bg-sky-100 px-3 py-2.5 text-[10.5px] leading-relaxed font-semibold text-sky-600">
+                          <b>Cara menambahkannya (60 detik):</b> di halaman yang terbuka, klik <b>Add variable</b> →
+                          Key: <code className="rounded bg-white px-1 font-mono">DATABASE_URL</code> ·
+                          Value: tempel <i>Read & Write connection string</i> Anda (diawali <code className="font-mono">postgresql://</code>) ·
+                          scopes: <b>All scopes</b> → Save. Lalu kembali ke Netlify tab <b>Deploys → Trigger deploy</b>,
+                          tunggu selesai, dan ulangi <b>Cek Semua</b>.
+                        </div>
+                      )}
+                    </div>
                   )}
                 </>
               );
