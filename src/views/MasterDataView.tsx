@@ -610,7 +610,7 @@ export default function MasterDataView() {
                 cloud.status === "on" ? "bg-ok-100 text-ok-600" : cloud.status === "error" ? "bg-danger-100 text-danger-600" : "bg-warn-100 text-warn-600"
               }`}>
                 <span className={`h-1.5 w-1.5 rounded-full ${cloud.status === "on" ? "anim-blink bg-ok-500" : cloud.status === "error" ? "bg-danger-500" : "bg-warn-500"}`} />
-                {cloud.status === "on" ? "TERHUBUNG" : cloud.status === "error" ? "GAGAL" : cloud.status === "connecting" ? "MENYAMBUNG…" : "OFFLINE / LOKAL"}
+                {cloud.status === "on" ? "ONLINE" : cloud.status === "connecting" ? "MENYAMBUNG…" : "OFFLINE"}
               </span>
             }
           >

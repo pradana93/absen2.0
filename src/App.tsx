@@ -109,27 +109,40 @@ function geoLabel(status?: string, sim?: boolean): string {
   return "GPS…";
 }
 
-/** Truthful DB status: NETLIFY DB / CLOUD ERROR / SQL LOKAL — click for details. */
+/** Live connection signal: ONLINE / OFFLINE / MENYAMBUNG… / SQL LOKAL — click for details. */
 function DbStatusPill() {
-  const { cloud, sql, presence, cloudPullNow } = useApp();
+  const { cloud, presence, cloudPullNow } = useApp();
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const mode = cloud.status === "on" ? "cloud" : cloud.status === "error" ? "error" : "local";
+  const onNetlify = /netlify\./.test(window.location.hostname);
+
+  /* online = connected · offline = deployed but can't reach the DB ·
+     connecting = probe in flight (or not yet started) · local = preview/localhost by design */
+  const mode: "online" | "offline" | "connecting" | "local" =
+    cloud.status === "on" ? "online"
+    : !onNetlify ? "local"
+    : cloud.status === "connecting" || (cloud.status === "off" && !cloud.reason) ? "connecting"
+    : "offline";
 
   const cls =
-    mode === "cloud" ? "border-sky-300 bg-sky-100/80 text-sky-600"
-    : mode === "error" ? "border-danger-300 bg-danger-100/80 text-danger-600"
+    mode === "online" ? "border-ok-300 bg-ok-100/80 text-ok-600"
+    : mode === "offline" ? "border-danger-300 bg-danger-100/80 text-danger-600"
+    : mode === "connecting" ? "border-warn-300 bg-warn-100/80 text-warn-600"
     : "border-ink-200 bg-white text-ink-500";
-  const label = mode === "cloud" ? "NETLIFY DB" : mode === "error" ? "CLOUD ERROR" : sql.status === "ready" ? "SQL LOKAL" : "CACHE";
-  const onNetlify = /netlify\./.test(window.location.hostname);
+  const label = mode === "online" ? "ONLINE" : mode === "offline" ? "OFFLINE" : mode === "connecting" ? "MENYAMBUNG…" : "SQL LOKAL";
+  const dot =
+    mode === "online" ? "anim-blink bg-ok-500"
+    : mode === "offline" ? "bg-danger-500"
+    : mode === "connecting" ? "animate-pulse bg-warn-500"
+    : "bg-ink-300";
   const desc =
-    mode === "cloud"
-      ? "Tersambung ke Postgres — perubahan tim tersinkron antar perangkat otomatis (poll tiap 20 dtk)."
-      : mode === "error"
-        ? cloud.reason ?? "Terjadi kesalahan saat menghubungi cloud."
-        : cloud.reason ?? (sql.status === "ready"
-          ? "Mesin SQLite lokal aktif. Data belum dibagikan ke perangkat lain."
-          : "Hot-cache localStorage aktif (mesin SQL sedang dimuat).");
+    mode === "online"
+      ? "Tersambung ke server database (Postgres) — perubahan tim tersinkron antar perangkat otomatis (poll tiap 20 dtk)."
+      : mode === "offline"
+        ? cloud.reason ?? "Tidak dapat menghubungi server database. Perubahan sementara tersimpan di perangkat dan akan disinkron ulang saat kembali online."
+        : mode === "connecting"
+          ? "Sedang menghubungi server database…"
+          : "Mode preview/localhost — fungsi cloud hanya hidup di URL Netlify yang ter-deploy, jadi di sini data selalu lokal.";
 
   const row = (k: string, v: string, strong?: boolean) => (
     <div className="flex items-center justify-between gap-3 py-1">
@@ -143,10 +156,10 @@ function DbStatusPill() {
       <button
         onClick={() => setOpen((o) => !o)}
         className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9.5px] font-extrabold tracking-wider transition active:scale-95 ${cls}`}
-        aria-label="Status database"
-        title="Status database"
+        aria-label="Status koneksi database"
+        title="Status koneksi database"
       >
-        <span className={`h-1.5 w-1.5 rounded-full ${mode === "cloud" ? "anim-blink bg-sky-500" : mode === "error" ? "bg-danger-500" : sql.status === "ready" ? "bg-ok-500" : "bg-warn-500"}`} />
+        <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
         {label}
       </button>
       {open && (
@@ -154,11 +167,12 @@ function DbStatusPill() {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="anim-pop absolute right-0 z-50 mt-2 w-72 rounded-2xl border border-ink-100 bg-white p-4 shadow-[0_24px_60px_rgba(23,42,89,0.22)]">
             <p className="flex items-center gap-2 font-display text-[14px] font-extrabold text-ink-900">
-              <span className={`h-2 w-2 rounded-full ${mode === "cloud" ? "anim-blink bg-sky-500" : mode === "error" ? "bg-danger-500" : "bg-ok-500"}`} />
-              {mode === "cloud" ? "Netlify DB (Postgres)" : mode === "error" ? "Cloud Bermasalah" : "Database Lokal"}
+              <span className={`h-2 w-2 rounded-full ${dot}`} />
+              {mode === "online" ? "Online · Server DB" : mode === "offline" ? "Offline" : mode === "connecting" ? "Menghubungkan…" : "Database Lokal"}
             </p>
             <p className="mt-1.5 text-[11px] leading-relaxed font-semibold text-ink-400">{desc}</p>
-            {mode === "local" && !onNetlify && (
+
+            {mode === "local" && (
               <div className="anim-fade-up mt-2.5 rounded-xl border border-warn-300 bg-warn-100 px-3 py-2.5">
                 <p className="text-[11px] font-extrabold text-warn-600">👉 Buka URL Netlify Anda</p>
                 <p className="mt-0.5 text-[10.5px] leading-snug font-semibold text-warn-600/85">
@@ -167,23 +181,28 @@ function DbStatusPill() {
                 </p>
               </div>
             )}
-            {mode === "local" && onNetlify && (
-              <div className="anim-fade-up mt-2.5 rounded-xl border border-warn-300 bg-warn-100 px-3 py-2.5">
-                <p className="text-[11px] font-extrabold text-warn-600">Langkah mengaktifkan:</p>
-                <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[10.5px] leading-snug font-semibold text-warn-600/85">
+
+            {mode === "offline" && (
+              <div className="anim-fade-up mt-2.5 rounded-xl border border-danger-300 bg-danger-100 px-3 py-2.5">
+                <p className="text-[11px] font-extrabold text-danger-600">Langkah memperbaiki:</p>
+                <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[10.5px] leading-snug font-semibold text-danger-600/85">
                   <li>Pastikan kode terbaru (dengan <span className="font-mono">netlify/functions/api.mjs</span>) sudah di-push & di-deploy</li>
-                  <li>Netlify DB ter-<i>link</i> ke site → env <span className="font-mono">DATABASE_URL</span> terinjeksi</li>
-                  <li>Super Admin → Master Data → Cloud → <b>Siapkan Skema & Unggah Data</b></li>
+                  <li>Env <span className="font-mono">DATABASE_URL</span> terpasang di site (lihat tombol di bawah)</li>
+                  <li>Muat ulang halaman ini</li>
                 </ol>
               </div>
             )}
-            <div className="mt-2.5 divide-y divide-ink-100/70 rounded-xl bg-ink-50 px-3 py-1">
-              {row("Server", cloud.serverVersion ? `PG ${cloud.serverVersion.split(" ")[0]}` : "—")}
-              {row("Baris cloud", cloud.rows.toLocaleString("id-ID"))}
-              {row("Perangkat online", String(cloud.presenceActive || presence.length), true)}
-              {row("Sinkron terakhir", cloud.lastSync ? wibTime(new Date(cloud.lastSync)) : "—")}
-            </div>
-            {mode === "cloud" && (
+
+            {mode === "online" && (
+              <div className="mt-2.5 divide-y divide-ink-100/70 rounded-xl bg-ink-50 px-3 py-1">
+                {row("Server", cloud.serverVersion ? `PG ${cloud.serverVersion.split(" ")[0]}` : "—")}
+                {row("Baris cloud", cloud.rows.toLocaleString("id-ID"))}
+                {row("Perangkat online", String(cloud.presenceActive || presence.length), true)}
+                {row("Sinkron terakhir", cloud.lastSync ? wibTime(new Date(cloud.lastSync)) : "—")}
+              </div>
+            )}
+
+            {mode === "online" && (
               <button
                 className="btn-sun mt-3 w-full !py-2.5 !text-[12.5px]"
                 onClick={async () => {
@@ -195,7 +214,8 @@ function DbStatusPill() {
                 <IconArrowRight size={13} className="rotate-180" /> Tarik Sekarang
               </button>
             )}
-            {mode === "error" && (
+
+            {mode === "offline" && (
               <div className="mt-2 space-y-2">
                 {(() => {
                   const m = window.location.hostname.match(/^([^.]+)\.netlify\.app$/);
@@ -213,6 +233,7 @@ function DbStatusPill() {
                 <button className="btn-ghost w-full !py-2 !text-[12px]" onClick={() => window.location.reload()}>Muat Ulang</button>
               </div>
             )}
+
             <p className="mt-2 text-center text-[9.5px] font-bold text-ink-300">Detail lengkap: Master Data → Cloud</p>
           </div>
         </>
