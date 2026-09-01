@@ -15,11 +15,11 @@ import GeofenceMap, { GeoDraft } from "../components/GeofenceMap";
 import { useToast } from "../components/Toast";
 import { Banner, Chip, Modal, SectionLabel, Toggle } from "../components/bits";
 import {
-  IconBriefcase, IconBuilding, IconCheck, IconClock, IconCpu, IconDatabase, IconDownload,
+  IconArrowRight, IconBriefcase, IconBuilding, IconCheck, IconClock, IconCpu, IconDatabase, IconDownload,
   IconEdit, IconEye, IconEyeOff, IconLock, IconMail, IconPin, IconPlus, IconRefresh, IconShield, IconTrash, IconUsers, IconWallet, IconX,
 } from "../components/icons";
 
-type Domain = "tenant" | "sites" | "employees" | "departments" | "shifts" | "reference" | "email" | "sql";
+type Domain = "tenant" | "sites" | "employees" | "departments" | "shifts" | "reference" | "email" | "sql" | "cloud";
 const SHIFT_COLORS: SiteColor[] = ["sun", "sky", "teal", "grape", "coral"];
 const ROLE_KEYS: Role[] = ["employee", "manager", "companyadmin", "superadmin"];
 
@@ -50,6 +50,7 @@ export default function MasterDataView() {
     updateLeaveQuota, updateSalaryDefault, addShift, updateShift, removeShift,
     importMasterData, audit, smtp, updateSmtp, sendTestEmail,
     refreshSql, runSql, exportSqlFile, vacuumSql,
+    cloud, cloudInitNow, cloudPullNow,
   } = app;
   const toast = useToast();
   const me = session!;
@@ -57,6 +58,7 @@ export default function MasterDataView() {
   if (me.role !== "superadmin") return <LockedVault />;
 
   const [open, setOpen] = useState<Domain | null>("sql");
+  const [cloudBusy, setCloudBusy] = useState<"" | "init" | "pull">("");
 
   /* site modal */
   const [siteModal, setSiteModal] = useState<{ mode: "add" | "edit"; site?: Site } | null>(null);
@@ -99,6 +101,7 @@ export default function MasterDataView() {
 
   const domains: Array<{ id: Domain; icon: React.ReactNode; title: string; desc: string; count: number; tint: string }> = [
     { id: "sql", icon: <IconDatabase size={18} />, title: "Mesin SQL", desc: "SQLite live · konsol & ekspor", count: sql.rows, tint: "bg-ink-900 text-sun-300" },
+    { id: "cloud", icon: <IconDatabase size={18} />, title: "Cloud (Netlify DB)", desc: cloud.status === "on" ? "Postgres · sinkron tim" : "Postgres · belum aktif", count: cloud.rows, tint: "bg-sky-100 text-sky-600" },
     { id: "tenant", icon: <IconBuilding size={18} />, title: "Tenant & Branding", desc: "Nama, logo, warna, identitas", count: 1, tint: "bg-sun-100 text-sun-600" },
     { id: "sites", icon: <IconShield size={18} />, title: "Gudang / Area", desc: "Geofence tiap lokasi", count: sites.length, tint: "bg-sky-100 text-sky-600" },
     { id: "employees", icon: <IconUsers size={18} />, title: "Direktori Karyawan", desc: "User master + perangkat", count: employees.length, tint: "bg-grape-100 text-grape-600" },
@@ -590,6 +593,102 @@ export default function MasterDataView() {
           <button className="btn-sun w-full" onClick={() => { audit("SMTP_UPDATE", "smtp", `Konfigurasi SMTP disimpan (${smtp.host}:${smtp.port} · ${smtp.user || "tanpa user"})`); toast.push("ok", "Konfigurasi SMTP disimpan", smtp.enabled ? "Reset kata sandi kini dikirim via email." : "SMTP masih nonaktif."); }}>
             <IconCheck size={16} /> Simpan Konfigurasi
           </button>
+        </section>
+      )}
+
+      {/* ----------------------------- CLOUD / NETLIFY DB --------------------- */}
+      {open === "cloud" && (
+        <section className="card anim-fade-up space-y-4 p-4">
+          <SectionLabel
+            right={
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-extrabold ${
+                cloud.status === "on" ? "bg-ok-100 text-ok-600" : cloud.status === "error" ? "bg-danger-100 text-danger-600" : "bg-warn-100 text-warn-600"
+              }`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${cloud.status === "on" ? "anim-blink bg-ok-500" : cloud.status === "error" ? "bg-danger-500" : "bg-warn-500"}`} />
+                {cloud.status === "on" ? "TERHUBUNG" : cloud.status === "error" ? "GAGAL" : cloud.status === "connecting" ? "MENYAMBUNG…" : "OFFLINE / LOKAL"}
+              </span>
+            }
+          >
+            <span className="inline-flex items-center gap-1.5"><IconDatabase size={16} /> Cloud — Netlify DB (Postgres)</span>
+          </SectionLabel>
+
+          <p className="rounded-xl bg-sky-100/70 px-3 py-2.5 text-[11.5px] leading-relaxed font-semibold text-sky-600">
+            Saat terhubung, seluruh tim berbagi database yang sama: absensi, cuti, karyawan, dan struktur organisasi
+            tersinkron antar perangkat. Mesin SQLite lokal tetap menjadi cache instan & mode offline.
+          </p>
+
+          {/* status grid */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-xl bg-ink-50 px-3 py-2.5 text-center">
+              <p className="font-display text-[20px] leading-none font-extrabold text-ink-900 tabular-nums">{cloud.rows}</p>
+              <p className="mt-1 text-[9px] font-extrabold tracking-wide text-ink-400 uppercase">Baris Cloud</p>
+            </div>
+            <div className="rounded-xl bg-ink-50 px-3 py-2.5 text-center">
+              <p className="font-display text-[20px] leading-none font-extrabold text-ink-900 tabular-nums">{sql.rows}</p>
+              <p className="mt-1 text-[9px] font-extrabold tracking-wide text-ink-400 uppercase">Baris Lokal</p>
+            </div>
+            <div className="rounded-xl bg-ink-50 px-3 py-2.5 text-center">
+              <p className="font-display text-[13px] leading-[20px] font-extrabold text-ink-900">{cloud.lastSync ? new Date(cloud.lastSync).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "—"}</p>
+              <p className="mt-1 text-[9px] font-extrabold tracking-wide text-ink-400 uppercase">Sinkron Terakhir</p>
+            </div>
+          </div>
+
+          {/* per-table counts */}
+          {cloud.status === "on" && Object.keys(cloud.counts).length > 0 && (
+            <div className="grid grid-cols-2 gap-1.5 min-[480px]:grid-cols-4">
+              {Object.entries(cloud.counts).map(([k, n]) => (
+                <div key={k} className="flex items-center justify-between rounded-lg border border-ink-100 bg-white px-2.5 py-1.5">
+                  <span className="font-mono text-[10px] font-bold text-ink-500">{k}</span>
+                  <span className="font-mono text-[11px] font-extrabold text-ink-900 tabular-nums">{n}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* actions */}
+          <div className="space-y-2.5">
+            {(!cloud.ready || cloud.status !== "on") && (
+              <button
+                className="btn-sun w-full"
+                disabled={cloudBusy !== ""}
+                onClick={async () => {
+                  setCloudBusy("init");
+                  const res = await cloudInitNow();
+                  setCloudBusy("");
+                  if (res.ok) { audit("CLOUD_INIT", "netlify-db", "Skema Postgres disiapkan & data lokal diunggah"); toast.push("ok", "Cloud siap 🎉", "Skema dibuat. Perubahan kini tersinkron ke Netlify DB."); }
+                  else toast.push("danger", "Gagal menyiapkan cloud", res.error);
+                }}
+              >
+                <IconDatabase size={16} /> {cloudBusy === "init" ? "Menyiapkan skema…" : "Siapkan Skema & Unggah Data"}
+              </button>
+            )}
+            <button
+              className="btn-ghost w-full"
+              disabled={cloudBusy !== "" || cloud.status !== "on"}
+              onClick={async () => {
+                setCloudBusy("pull");
+                const ok = await cloudPullNow();
+                setCloudBusy("");
+                if (ok) { audit("CLOUD_PULL", "netlify-db", "Data cloud ditarik ke perangkat"); toast.push("ok", "Data cloud dimuat", "Cache lokal diperbarui dari Postgres."); }
+                else toast.push("danger", "Gagal menarik data", "Periksa koneksi & Netlify DB.");
+              }}
+            >
+              <IconArrowRight size={15} className="rotate-180" /> {cloudBusy === "pull" ? "Menarik data…" : "Tarik dari Cloud Sekarang"}
+            </button>
+          </div>
+
+          {cloud.status !== "on" && (
+            <div className="rounded-xl bg-warn-100/70 px-3 py-2.5 text-[11px] leading-relaxed font-semibold text-warn-600">
+              <b>Belum terhubung?</b> Pastikan: (1) Netlify DB sudah di-<i>link</i> ke site sehingga env <code className="font-mono">DATABASE_URL</code> terinjeksi otomatis,
+              (2) site sudah di-deploy ulang agar function <code className="font-mono">api</code> aktif, dan (3) Anda membuka URL Netlify
+              (bukan localhost — untuk dev lokal pakai <code className="font-mono">netlify dev</code>).
+            </div>
+          )}
+
+          <p className="text-[10px] leading-relaxed font-semibold text-ink-300">
+            Arsitektur: browser → Netlify Function (SQL berparameter, origin terbatasi) → Postgres. Kredensial DB tidak pernah menyentuh browser.
+            Slip gaji masih lokal di Fase 2; autentikasi JWT tervalidasi server = Fase 3.
+          </p>
         </section>
       )}
 

@@ -147,7 +147,20 @@ function load<T>(key: string, fallback: T): T {
   } catch { return fallback; }
 }
 
-/** Write-through: hot-cache (localStorage) + durable engine (SQLite). */
+/* Fase 2 cloud sink — enabled by the store once the Netlify DB responds. */
+let cloudWrites = false;
+export function setCloudWrites(v: boolean) { cloudWrites = v; }
+export const cloudWritesEnabled = () => cloudWrites;
+type CloudMod = typeof import("./sql/cloud");
+let cloudMod: CloudMod | null = null;
+function queueCloud(key: string, value: unknown) {
+  if (!cloudWrites) return;
+  const rows = key === "company" ? [value] : value;
+  if (cloudMod) { cloudMod.queueCloudSync(key, rows); return; }
+  void import("./sql/cloud").then((m) => { cloudMod = m; m.queueCloudSync(key, rows); }).catch(() => undefined);
+}
+
+/** Write-through: hot-cache (localStorage) + durable engine (SQLite) + cloud (Postgres). */
 function save(key: string, value: unknown) {
   try { localStorage.setItem(NS + key, JSON.stringify(value)); } catch {
     try { window.dispatchEvent(new Event("vittoria:storage-full")); } catch { /* noop */ }
@@ -158,6 +171,7 @@ function save(key: string, value: unknown) {
   } else if (!bridgeMod) {
     void bridge(); // warm the module; the boot migration syncs everything anyway
   }
+  queueCloud(key, value);
 }
 
 export function clearAll() {

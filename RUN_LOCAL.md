@@ -44,7 +44,39 @@ should never have to type build configuration:
 Optional polish: Site configuration → **Change site name** (e.g.
 `vittoria-hr.netlify.app`) or add a custom domain — HTTPS renews automatically.
 
-## 3. Real password-reset emails (Gmail SMTP)
+## 3. Shared team database — Netlify DB (Postgres)
+
+This is what turns the app from "one device" into "the whole warehouse shares
+one database". The browser never touches Postgres directly — a bundled Netlify
+Function (`netlify/functions/api.mjs`) runs parameterized SQL on its behalf.
+
+1. **Create the DB** (you already did): Netlify dashboard → your site →
+   *Storage / Databases* → add a **Netlify DB (Postgres)**.
+2. **Link it to the site** so Netlify injects the `DATABASE_URL` environment
+   variable automatically (happens when the DB is added to the site).
+3. **Push & redeploy** — the `api` function goes live with the deploy.
+4. In the app: **Super Admin → Master Data → "Cloud (Netlify DB)"** →
+   click **"Siapkan Skema & Unggah Data"**. The function creates all tables
+   (idempotent — safe to re-run) and uploads your current local data.
+5. From then on, every change (clock-in, leave, new employee…) is written
+   locally *and* pushed to Postgres (~0.8 s debounce), and every device
+   hydrates from Postgres on load. The header strip shows **☁ Cloud DB**
+   when connected; **SQL Lokal** means offline/local-only.
+
+Useful operations in that same panel: **Tarik dari Cloud Sekarang**
+(force re-pull), per-table row counts, last-sync time, and a status badge.
+
+Local development against the real DB: `netlify login && netlify link &&
+netlify dev` — this runs the function locally with `DATABASE_URL` injected.
+Plain `npm run dev` has no function, so the app simply stays in local mode.
+
+Honest scope notes (Fase 2): payroll slips remain device-local, sync is
+last-write-wins per collection (fine for one warehouse team), and the API
+guard is origin + session-presence — cryptographic JWT verification
+server-side is the Fase 3 upgrade. The full schema reference lives in
+`server/schema.postgres.sql` (matches the function's DDL exactly).
+
+## 4. Real password-reset emails (Gmail SMTP)
 
 Handled by the bundled Netlify Function (`netlify/functions/send-mail.mjs`) —
 it activates automatically with the deploy; no extra setup.
@@ -61,17 +93,20 @@ it activates automatically with the deploy; no extra setup.
 If SMTP is off or the function is unreachable, the app gracefully falls back
 to the in-app simulated inbox — nobody is ever locked out.
 
-## 4. Your data: backup & moving devices
+## 5. Your data: backup & moving devices
 
-Data lives in each browser's storage (localStorage hot-cache + a real SQLite
-file in IndexedDB). To move a company between devices/URLs:
+With **Netlify DB connected** (section 3), all devices share one Postgres
+database automatically — nothing to move.
+
+Without it, data lives in each browser's storage (localStorage hot-cache + a
+real SQLite file in IndexedDB). To move a company between devices/URLs:
 
 1. Old environment: **Super Admin → Master Data → Ekspor** (JSON or `.sqlite`)
 2. New environment: **Master Data → Impor** → pick the file
 
 Attendance history exports as CSV/Excel from the **Riwayat** view.
 
-## 5. Troubleshooting
+## 6. Troubleshooting
 
 | Symptom | Fix |
 |---|---|
@@ -81,6 +116,9 @@ Attendance history exports as CSV/Excel from the **Riwayat** view.
 | GPS stuck on "mencari…" | Desktops often have no GPS — enable **Simulasi GPS** in Aturan/Sistem for demos |
 | Stale UI after a deploy | The service worker caches assets; hard-refresh once, or unregister it in DevTools → Application |
 | Email test fails | Check the App Password (not your Gmail password); Gmail may log the attempt — approve it in Google Account security alerts |
+| Cloud stays "OFFLINE / LOKAL" | DB must be *linked to the site* (so `DATABASE_URL` is injected) and the site *redeployed* (so the `api` function exists); open the Netlify URL, not localhost |
+| "Siapkan Skema" errors | Open Netlify → Functions → `api` → logs; the most common cause is a missing `DATABASE_URL` env var (link the DB) |
+| Data differs between two devices | On each device: Master Data → Cloud → **Tarik dari Cloud Sekarang**; sync is last-write-wins per collection |
 
 ---
 

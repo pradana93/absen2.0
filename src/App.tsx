@@ -175,13 +175,16 @@ function ErrorNet() {
     const onErr = () => { if (gate("err")) toast.push("danger", "Terjadi kesalahan teknis", "Aksi terakhir mungkin belum tersimpan — coba lagi."); };
     const onRej = () => { if (gate("rej")) toast.push("warn", "Proses tertunda", "Mesin wajah atau jaringan lambat — ulangi sebentar lagi."); };
     const onFull = () => { if (gate("full")) toast.push("danger", "Penyimpanan perangkat penuh", "Data baru mungkin tidak tersimpan. Hapus foto/lampiran lama."); };
+    const onCloudErr = () => { if (gate("cloud")) toast.push("warn", "Sinkronisasi cloud tertunda", "Perubahan tersimpan lokal & akan dicoba lagi — cek koneksi atau Netlify DB."); };
     window.addEventListener("error", onErr);
     window.addEventListener("unhandledrejection", onRej);
     window.addEventListener("vittoria:storage-full", onFull as EventListener);
+    window.addEventListener("vittoria:cloud-error", onCloudErr as EventListener);
     return () => {
       window.removeEventListener("error", onErr);
       window.removeEventListener("unhandledrejection", onRej);
       window.removeEventListener("vittoria:storage-full", onFull as EventListener);
+      window.removeEventListener("vittoria:cloud-error", onCloudErr as EventListener);
     };
   }, [toast]);
   return null;
@@ -208,7 +211,7 @@ function IconLogoMini() {
 }
 
 function Shell() {
-  const { session, company, sites, siteId, switchSite, activeSite, engine, geo, fence, tokenExp, logout, sql, leaves } = useApp();
+  const { session, company, sites, siteId, switchSite, activeSite, engine, geo, fence, tokenExp, logout, sql, cloud, leaves } = useApp();
   const toast = useToast();
   const [view, setView] = useState<ViewId>("home");
   const [initialType, setInitialType] = useState<AttendanceType>("IN");
@@ -382,7 +385,9 @@ function Shell() {
               {engine === "ai" ? "AI 128-D" : engine === "lite" ? "Mode Lite" : "Memuat AI…"}
             </span>
             <span className="h-3 w-px shrink-0 bg-ink-100" />
-            <span className={`shrink-0 ${sql.status === "ready" ? "text-ok-600" : "text-warn-600"}`}>SQL {sql.status === "ready" ? "Aktif" : "…"}</span>
+            <span className={`shrink-0 ${cloud.status === "on" ? "text-sky-600" : sql.status === "ready" ? "text-ok-600" : "text-warn-600"}`}>
+              {cloud.status === "on" ? "☁ Cloud DB" : sql.status === "ready" ? "SQL Lokal" : "Cache"}
+            </span>
             <span className="h-3 w-px shrink-0 bg-ink-100" />
             <span className="shrink-0 font-mono tabular-nums">Sesi {fmtExpLeft(tokenExp)}</span>
             <span className="h-3 w-px shrink-0 bg-ink-100" />
