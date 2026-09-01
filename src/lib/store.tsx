@@ -272,15 +272,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const st = await cl.cloudStats();
       if (disposed) return;
       if (!st) {
-        const isLocal = /localhost|127\.0\.0\.1/.test(window.location.hostname);
+        const host = window.location.hostname;
+        const isLocal = /localhost|127\.0\.0\.1/.test(host);
         setCloud((prev) => ({
           ...prev, status: "off",
           reason: isLocal
-            ? "Dibuka dari localhost — fungsi cloud hanya hidup di URL Netlify. Untuk dev lokal pakai `netlify dev`."
-            : "Fungsi cloud tidak terjangkau — deploy ulang site & pastikan Netlify DB ter-link (env DATABASE_URL ada).",
+            ? "Dibuka dari localhost/preview — fungsi cloud hanya hidup di URL hasil deploy (Vercel/Netlify/Cloudflare). Deploy dulu, lalu buka URL publiknya."
+            : `Fungsi cloud tidak terjangkau di ${host}. Pastikan deploy memakai kode terbaru & env DATABASE_URL / POSTGRES_URL terpasang, lalu redeploy.`,
         }));
       } else {
         revsRef.current = st.revs;
+
+        /* ---- AUTO-BOOTSTRAP: schema missing or DB empty → set itself up ----
+           Ini yang membuat "orang lain bisa langsung pakai": perangkat pertama
+           men-seed database, perangkat berikutnya otomatis menarik isinya. */
+        const EXPECTED_TABLES = 15;
+        const schemaReady = st.tables >= EXPECTED_TABLES;
+        const dbEmpty = st.rows === 0;
+        if (!schemaReady || dbEmpty) {
+          await cl.cloudInit();                       // idempotent CREATE TABLE IF NOT EXISTS
+          if (disposed) return;
+          cl.setCloudActive(true);
+          setCloudWrites(true);
+          if (dbEmpty) {
+            // DB kosong → unggah data lokal (bootstrap perangkat pertama)
+            for (const [key, rows] of localSnapshot()) cl.queueCloudSync(key, rows);
+          }
+        }
+
         const pull = await cl.cloudPull();
         if (disposed) return;
         if (pull.ok) {
@@ -288,14 +307,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setCloudWrites(true);
           cloudHadDataRef.current = pull.hasData;
           setCloud({
-            status: "on", ready: pull.ready, rows: st.rows, counts: pull.counts, version: pull.version,
+            status: "on", ready: pull.ready, rows: pull.hasData ? pull.rows : st.rows, counts: pull.counts, version: pull.version,
             lastSync: Date.now(), reason: null, serverVersion: st.serverVersion || null, presenceActive: st.presenceActive.length,
           });
           setPresence(st.presenceActive);
           if (pull.ready && pull.hasData) applyCloudData(pull.data);
           void cl.flushQueue();
         } else {
-          setCloud((prev) => ({ ...prev, status: "error", reason: `Pull gagal: ${pull.error ?? "periksa log fungsi di Netlify."}` }));
+          setCloud((prev) => ({ ...prev, status: "error", reason: `Pull gagal: ${pull.error ?? "periksa log fungsi di dashboard host Anda."}` }));
         }
       }
     });

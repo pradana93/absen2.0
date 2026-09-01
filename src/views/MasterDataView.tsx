@@ -620,8 +620,9 @@ export default function MasterDataView() {
           </SectionLabel>
 
           <p className="rounded-xl bg-sky-100/70 px-3 py-2.5 text-[11.5px] leading-relaxed font-semibold text-sky-600">
-            Saat terhubung, seluruh tim berbagi database yang sama: absensi, cuti, karyawan, dan struktur organisasi
-            tersinkron antar perangkat. Mesin SQLite lokal tetap menjadi cache instan & mode offline.
+            Seluruh tim berbagi satu database: absensi, cuti, karyawan, dan struktur organisasi tersinkron antar perangkat.
+            <b> Semuanya otomatis</b> — perangkat pertama men-seed database saat kosong, perangkat lain (bahkan sebelum login)
+            langsung menarik data terbaru. Mesin SQLite lokal tetap menjadi cache instan & mode offline.
           </p>
 
           {/* status grid */}
@@ -745,13 +746,13 @@ export default function MasterDataView() {
                   ok: tried ? Boolean(ping!.ok && ping!.schemaReady) : null,
                   title: "Skema 15 tabel siap",
                   desc: ping?.ok && !ping.schemaReady && ping.missing?.length ? `Kurang: ${ping.missing.join(", ")}…` : "Tabel absensi, karyawan, cuti, dll. sudah ada.",
-                  fix: 'Tekan "Siapkan Skema & Unggah Data" di bawah — aman dijalankan berulang.',
+                  fix: "Aplikasi membuatnya otomatis saat pertama kali terhubung — atau tekan \"Siapkan Skema & Unggah Data\" (aman berulang).",
                 },
                 {
                   ok: tried ? Boolean(ping!.ok && (ping!.rows ?? 0) > 0) : null,
                   title: "Data sudah di cloud",
                   desc: ping?.ok ? `${(ping.rows ?? 0).toLocaleString("id-ID")} baris tersimpan di Postgres.` : "Seluruh data lokal terunggah sekali.",
-                  fix: "Setelah skema siap, tekan \"Siapkan Skema & Unggah Data\" untuk mengunggah data perangkat ini.",
+                  fix: "Otomatis: perangkat pertama men-seed DB saat kosong; perangkat lain langsung menariknya — bahkan sebelum login.",
                 },
                 {
                   ok: multiDevDone,
@@ -887,14 +888,15 @@ export default function MasterDataView() {
 
           {cloud.status !== "on" && (
             <div className="rounded-xl bg-warn-100/70 px-3 py-2.5 text-[11px] leading-relaxed font-semibold text-warn-600">
-              <b>Belum terhubung?</b> Pastikan: (1) Netlify DB sudah di-<i>link</i> ke site sehingga env <code className="font-mono">DATABASE_URL</code> terinjeksi otomatis,
-              (2) site sudah di-deploy ulang agar function <code className="font-mono">api</code> aktif, dan (3) Anda membuka URL Netlify
-              (bukan localhost — untuk dev lokal pakai <code className="font-mono">netlify dev</code>).
+              <b>Belum terhubung?</b> Pastikan: (1) env <code className="font-mono">DATABASE_URL</code> / <code className="font-mono">POSTGRES_URL</code> terpasang
+              (Vercel: hubungkan Vercel Postgres di tab Storage; Netlify: link Netlify DB; atau isi manual),
+              (2) site sudah di-deploy ulang agar function <code className="font-mono">api</code> aktif, dan (3) Anda membuka URL hasil deploy
+              (bukan localhost/preview). Lihat <b>HOSTING.md</b> untuk panduan per-host.
             </div>
           )}
 
           <p className="text-[10px] leading-relaxed font-semibold text-ink-300">
-            Arsitektur: browser → Netlify Function (SQL berparameter, origin terbatasi) → Postgres. Kredensial DB tidak pernah menyentuh browser.
+            Arsitektur: browser → server function (SQL berparameter, origin terbatasi) → Postgres. Kredensial DB tidak pernah menyentuh browser.
             Slip gaji masih lokal di Fase 2; autentikasi JWT tervalidasi server = Fase 3.
           </p>
         </section>
