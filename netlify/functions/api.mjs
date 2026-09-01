@@ -190,15 +190,17 @@ export default async (req, context) => {
       return json({ ok: true, ready, hasData: total > 0, rows: total, counts, data, version });
     }
 
-    const spec = specOf(key);
-    if (!spec) return json({ ok: false, error: `Tabel "${key}" tidak dikenal.` }, 400);
-    const exists = await sql(`SELECT to_regclass($1) AS r`, [spec.table]);
-    if (!exists[0]?.r) return json({ ok: false, error: "Skema belum dibuat — jalankan op:init dulu." }, 409);
+    /* ------------- table-keyed ops (sync/remove/clear) -------------------- */
+    if (op === "sync" || op === "remove" || op === "clear") {
+      const spec = specOf(key);
+      if (!spec) return json({ ok: false, error: `Tabel "${key ?? "(kosong)"}" tidak dikenal.` }, 400);
+      const exists = await sql(`SELECT to_regclass($1) AS r`, [spec.table]);
+      if (!exists[0]?.r) return json({ ok: false, error: "Skema belum dibuat — jalankan op:init dulu." }, 409);
 
-    const bumpRev = () => sql(
-      `INSERT INTO "meta" ("k","v") VALUES ($1,$2) ON CONFLICT ("k") DO UPDATE SET "v" = EXCLUDED."v"`,
-      [`rev:${key}`, String(Date.now())],
-    );
+      const bumpRev = () => sql(
+        `INSERT INTO "meta" ("k","v") VALUES ($1,$2) ON CONFLICT ("k") DO UPDATE SET "v" = EXCLUDED."v"`,
+        [`rev:${key}`, String(Date.now())],
+      );
 
     /* ------------------------------- sync -------------------------------- */
     if (op === "sync") {
@@ -242,6 +244,7 @@ export default async (req, context) => {
       await bumpRev();
       return json({ ok: true });
     }
+    } /* end table-keyed ops */
 
     /* ------------------------------- stats ------------------------------- */
     if (op === "stats") {
