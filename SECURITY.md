@@ -25,6 +25,9 @@ role password / Gmail App Password / API key), then purge it from history.
   bound; the read-only SQL console rejects anything but `SELECT/PRAGMA/WITH/EXPLAIN`
 - **No credentials in the browser** — the DB is reached only through
   serverless functions; the connection string never ships to clients
+- **Supabase schema isolation** — all tables are created in a dedicated
+  `vittoria` schema, never `public`, so Supabase's auto-generated REST API
+  (anon key) can't see employee/attendance data
 - **Origin allowlist + session header** on every API call
 - **Device binding** — accounts lock to their first-login device; foreign
   devices are refused and audited

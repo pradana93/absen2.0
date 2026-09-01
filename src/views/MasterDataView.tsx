@@ -740,7 +740,7 @@ export default function MasterDataView() {
                   ok: tried ? Boolean(ping!.ok && ping!.serverVersion) : null,
                   title: "Postgres menjawab",
                   desc: ping?.ok ? `${String(ping.serverVersion).replace("PostgreSQL ", "").split(" ")[0]} · ${ping.serverMs} ms di server` : "Connection string terbaca oleh fungsi (DATABASE_URL atau POSTGRES_URL).",
-                  fix: "Vercel: Storage → Create → Postgres → hubungkan ke project (env POSTGRES_URL terinjeksi otomatis). Netlify: link Netlify DB (DATABASE_URL). Lalu redeploy.",
+                  fix: "Supabase: salin string Transaction pooler (port 6543), ganti [YOUR-PASSWORD], pasang sebagai env DATABASE_URL. Atau Vercel Postgres (POSTGRES_URL otomatis) / Netlify DB. Lalu redeploy.",
                 },
                 {
                   ok: tried ? Boolean(ping!.ok && ping!.schemaReady) : null,
@@ -888,10 +888,10 @@ export default function MasterDataView() {
 
           {cloud.status !== "on" && (
             <div className="rounded-xl bg-warn-100/70 px-3 py-2.5 text-[11px] leading-relaxed font-semibold text-warn-600">
-              <b>Belum terhubung?</b> Pastikan: (1) env <code className="font-mono">DATABASE_URL</code> / <code className="font-mono">POSTGRES_URL</code> terpasang
-              (Vercel: hubungkan Vercel Postgres di tab Storage; Netlify: link Netlify DB; atau isi manual),
+              <b>Belum terhubung?</b> Pastikan: (1) env <code className="font-mono">DATABASE_URL</code> terpasang — untuk <b>Supabase</b> pakai string
+              <i> Transaction pooler</i> (port 6543, username <code className="font-mono">postgres.&lt;ref&gt;</code>) dengan password asli;
               (2) site sudah di-deploy ulang agar function <code className="font-mono">api</code> aktif, dan (3) Anda membuka URL hasil deploy
-              (bukan localhost/preview). Lihat <b>HOSTING.md</b> untuk panduan per-host.
+              (bukan localhost/preview). Lihat <b>HOSTING.md</b> untuk panduan lengkap.
             </div>
           )}
 

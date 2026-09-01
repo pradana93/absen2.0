@@ -7,14 +7,18 @@ never talks to Postgres directly — each host runs a tiny API function
 
 | Host | Free bandwidth | Functions | DB | Email | Best for |
 |---|---|---|---|---|---|
-| **Cloudflare Pages** ⭐ | **Unlimited** | Pages Functions (included) | Any Postgres (Neon free) | Resend (free 100/day) or fallback | escaping usage limits |
-| **Vercel** | 100 GB/mo | Edge/Node (included) | Vercel Postgres / Neon | Gmail SMTP native | easiest switch |
-| **Netlify** | 100 GB/mo | Netlify Functions | Netlify DB / Neon | Gmail SMTP native | what you have now |
-| **PythonAnywhere** | limited (PA) | Flask web app | needs $5 tier* | Gmail SMTP native (smtplib) | Python-flavored ops |
+| **Vercel** ⭐ | 100 GB/mo | Node (included) | **Supabase** / Vercel Postgres / any Postgres | Gmail SMTP native | current production |
+| **Netlify** | 100 GB/mo | Netlify Functions | **Supabase** / Netlify DB / any Postgres | Gmail SMTP native | alternative |
+| **PythonAnywhere** | limited (PA) | Flask web app | **Supabase** — needs $5 tier* | Gmail SMTP native (smtplib) | Python-flavored ops |
+| **Cloudflare Pages** | **Unlimited** | Pages Functions (included) | Neon-family only** | Resend (free 100/day) or fallback | escaping usage limits |
 
 \* PA **free** tier only allows outbound connections to whitelisted hosts —
-Neon/Netlify-DB hostnames are not whitelisted, so the DB bridge needs the
-$5/mo tier (or a whitelisted Postgres). SMTP and static serving work on free.
+`supabase.co` poolers are not whitelisted, so the DB bridge needs the $5/mo
+tier (SMTP and static serving still work on free).
+
+\*\* Cloudflare Workers can't open TCP sockets; that function uses Neon's
+HTTP driver, which only speaks to Neon-hosted databases. **Supabase users:
+host on Vercel, Netlify, or PythonAnywhere.**
 
 ---
 
@@ -34,6 +38,35 @@ Wherever you host next, the migration is the same three moves:
    touched your data).
 
 ---
+
+## 🐘 Using Supabase as your database (recommended)
+
+The API function speaks plain Postgres, so a free **Supabase** project works
+as the shared team database on Vercel, Netlify, or PythonAnywhere.
+
+1. Supabase dashboard → your project → **Project Settings → Database**.
+2. Under **Connection string**, switch the selector to **Transaction pooler**
+   (NOT "Direct" — the pooler is built for serverless functions; the direct
+   connection has a small connection cap that functions can exhaust). It
+   looks like:
+   ```
+   postgresql://postgres.abc123xyz:[YOUR-PASSWORD]@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=require
+   ```
+3. Replace `[YOUR-PASSWORD]` with your database password (shown just above;
+   reset it there if you've lost it).
+4. Paste the full string as **`DATABASE_URL`** in your host's environment
+   variables (Vercel: Project → Settings → Environment Variables) → **redeploy**.
+5. Open the app → the header flips 🟢 **ONLINE** and, on first connect, the
+   app creates its own schema/tables and seeds them automatically.
+
+**Two things worth knowing:**
+
+- **Your tables are private by design.** The app creates everything in a
+  dedicated `vittoria` schema, *not* `public` — so Supabase's auto-generated
+  REST API never exposes your employee/attendance data to the anon key.
+- **Switching databases re-seeds safely.** Point `DATABASE_URL` at a new/empty
+  database and the first device to connect uploads the full dataset from its
+  local cache — nothing is lost when you move hosts.
 
 ## Option A — Cloudflare Pages (recommended: unlimited bandwidth)
 
@@ -57,11 +90,11 @@ Custom domain: Pages → Custom domains — HTTPS automatic. Your URL keeps work
      directly, no manual env needed. Free limits (~256 MB storage, 3 GB
      transfer/mo) are far beyond attendance-scale data; check current numbers
      under Storage → your DB → Usage.
-   - **Any external Postgres** (your Netlify DB string, or a free
-     [neon.tech](https://neon.tech) DB): add it manually as `DATABASE_URL`
-     under Project → Settings → Environment Variables.
-   Either one works — the function reads `DATABASE_URL` first, then `POSTGRES_URL`.
-3. (+ optional `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM_NAME` for real Gmail email — works natively on Vercel's Node runtime; the in-app SMTP config in Master Data also works.)
+    - **Supabase** (see the 🐘 section above): paste the *Transaction pooler*
+      string as `DATABASE_URL` under Project → Settings → Environment Variables.
+    - **Any other external Postgres** (a free [neon.tech](https://neon.tech) DB,
+      etc.): also add it manually as `DATABASE_URL`.
+    All work — the function reads `DATABASE_URL` first, then `POSTGRES_URL`.3. (+ optional `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM_NAME` for real Gmail email — works natively on Vercel's Node runtime; the in-app SMTP config in Master Data also works.)
 4. Deploy. Routes: `api/db.mjs` → `/api/db`, `api/mail.mjs` → `/api/mail` (the DB route literally re-exports the Netlify handler — same code).
 5. Same verification: Master Data → Cloud → **Cek Semua**.
 
