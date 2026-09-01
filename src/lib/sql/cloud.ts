@@ -39,13 +39,15 @@ export function setApiOverride(v: string | null): void {
 /** True when running on a real host where serverless functions exist. */
 export function isDeployedHost(): boolean {
   const h = window.location.hostname;
-  return (
-    /(^|\.)netlify\.app$/.test(h) ||
-    /(^|\.)pages\.dev$/.test(h) ||
-    /(^|\.)vercel\.app$/.test(h) ||
-    /(^|\.)pythonanywhere\.com$/.test(h) ||
-    Boolean(getApiOverride())
-  );
+  if (getApiOverride()) return true;
+  if (/(^|\.)netlify\.app$/.test(h)) return true;
+  if (/(^|\.)pages\.dev$/.test(h)) return true;
+  if (/(^|\.)vercel\.app$/.test(h)) return true;
+  if (/(^|\.)pythonanywhere\.com$/.test(h)) return true;
+  /* custom domain / any other public host: treat as deployed — the ping
+     (langkah 2 "Cek Semua") is the real judge of whether the function is alive. */
+  if (h === "localhost" || /^127\./.test(h) || h === "0.0.0.0" || h === "::1" || /\.localhost$/.test(h)) return false;
+  return true;
 }
 
 export function apiUrl(): string {

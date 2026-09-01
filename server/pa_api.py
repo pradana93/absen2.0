@@ -33,7 +33,12 @@ try:
 except ImportError:
     pass
 
-DATABASE_URL = os.environ.get("DATABASE_URL", globals().get("DATABASE_URL"))
+DATABASE_URL = (
+    os.environ.get("DATABASE_URL")
+    or globals().get("DATABASE_URL")
+    or os.environ.get("POSTGRES_URL")
+    or globals().get("POSTGRES_URL")
+)
 SMTP_HOST = os.environ.get("SMTP_HOST", globals().get("SMTP_HOST", "smtp.gmail.com"))
 SMTP_PORT = int(os.environ.get("SMTP_PORT", globals().get("SMTP_PORT", 465)))
 SMTP_USER = os.environ.get("SMTP_USER", globals().get("SMTP_USER", ""))
