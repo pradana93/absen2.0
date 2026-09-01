@@ -4,6 +4,11 @@ dist/
 build/
 *.log
 
+# PythonAnywhere secrets — never commit real credentials
+server/pa_config.py
+__pycache__/
+*.pyc
+
 # secrets — NEVER commit connection strings / env files
 .env
 .env.*

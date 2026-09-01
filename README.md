@@ -64,7 +64,7 @@ npm run build    # production build → dist/
 
 New employees take their **base photo at first login** (HR no longer captures it at account creation).
 
-See **`RUN_LOCAL.md`** for the full walkthrough: running locally, deploying to **Netlify** (the only supported host — config committed, zero dashboard setup), Gmail SMTP setup, backups, and troubleshooting. The former GitHub Pages workflow has been removed.
+The app is **host-agnostic** — see **`HOSTING.md`** for step-by-step deploys to **Cloudflare Pages** (unlimited bandwidth — recommended), **Vercel**, **Netlify**, or **PythonAnywhere** (Flask port included in `server/`), plus the portable-data migration recipe, per-host SMTP setup, and troubleshooting. **`RUN_LOCAL.md`** covers running on your laptop and the Netlify-specific details.
 
 ## 📦 Tech stack
 

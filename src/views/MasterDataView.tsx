@@ -5,6 +5,7 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { useApp } from "../lib/store";
+import { getApiOverride, isDeployedHost, setApiOverride } from "../lib/sql/cloud";
 import {
   applyBrand, BRAND_PRESETS, DATA_VERSION, downloadBlob, downloadTextFile, encodeIdentity,
   LEAVE_TYPES, LeaveType, MasterPayload, readCrashLog, ROLE_LABEL, Role, SalaryStructure, Shift,
@@ -61,6 +62,7 @@ export default function MasterDataView() {
   const [cloudBusy, setCloudBusy] = useState<"" | "init" | "pull">("");
   const [ping, setPing] = useState<import("../lib/sql/cloud").PingResult | null>(null);
   const [pingBusy, setPingBusy] = useState(false);
+  const [apiOverride, setApiOv] = useState(getApiOverride() ?? "");
   const [multiDevDone, setMultiDevDone] = useState(() => {
     try { return localStorage.getItem("vittoria:multidev-ok") === "1"; } catch { return false; }
   });
@@ -650,6 +652,47 @@ export default function MasterDataView() {
             </div>
           )}
 
+          {/* endpoint override — untuk host non-standar (PA, custom domain, server sendiri) */}
+          <div className="space-y-2 rounded-2xl border border-ink-100 bg-white p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[12px] font-extrabold text-ink-800">Endpoint API (lanjutan)</p>
+                <p className="truncate text-[10px] font-semibold text-ink-400">
+                  {getApiOverride() ? <span className="font-mono text-ok-600">{getApiOverride()}</span> : "Otomatis sesuai host — Netlify / Cloudflare / Vercel / PythonAnywhere terdeteksi sendiri."}
+                </p>
+              </div>
+              {getApiOverride() && (
+                <button
+                  className="btn-ghost shrink-0 !rounded-xl !px-3 !py-2 !text-[11px]"
+                  onClick={() => { setApiOverride(null); setApiOv(""); toast.push("info", "Endpoint direset", "Kembali ke deteksi host otomatis — muat ulang halaman."); }}
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            {!getApiOverride() && (
+              <div className="flex gap-2">
+                <input
+                  className="input !py-2.5 font-mono !text-[12px]"
+                  placeholder="https://situs-anda.com/api/ops"
+                  value={apiOverride}
+                  onChange={(e) => setApiOv(e.target.value)}
+                />
+                <button
+                  className="btn-soft shrink-0 !rounded-xl !px-4 !py-2.5 !text-[12px]"
+                  onClick={() => {
+                    const v = apiOverride.trim();
+                    if (!/^https?:\/\/.+/i.test(v)) return toast.push("warn", "URL tidak valid", "Harus diawali http(s)://");
+                    setApiOverride(v);
+                    toast.push("ok", "Endpoint disimpan", "Muat ulang halaman agar berlaku, lalu Cek Semua.");
+                  }}
+                >
+                  Simpan
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* go-live checklist */}
           <div className="space-y-3 rounded-2xl bg-ink-50 p-4">
             <div className="flex items-center justify-between gap-3">
@@ -674,20 +717,20 @@ export default function MasterDataView() {
             </div>
 
             {(() => {
-              const onDeployedUrl = !/(^|\.)localhost$|^127\.0\.0\.1$/.test(window.location.hostname);
+              const onDeployedUrl = isDeployedHost();
               const tried = ping !== null;
               const steps: Array<{ ok: boolean | null; title: string; desc: string; fix?: string }> = [
                 {
                   ok: onDeployedUrl,
                   title: "Dibuka dari URL yang ter-deploy",
-                  desc: "URL Netlify situs Anda (atau domain sendiri).",
-                  fix: "Cloud hanya hidup di URL hasil deploy — localhost/preview tidak memiliki Netlify Function.",
+                  desc: "URL Netlify / Cloudflare / Vercel / PythonAnywhere situs Anda (atau endpoint kustom).",
+                  fix: "Cloud hanya hidup di URL hasil deploy — localhost/preview tidak memiliki fungsi server. Atau set Endpoint API kustom di bawah.",
                 },
                 {
                   ok: tried ? ping!.ok : null,
                   title: "Fungsi `api` merespons",
                   desc: "Jembatan browser → server → Postgres aktif.",
-                  fix: "Redeploy situs sekali: Netlify → tab Deploys → Trigger deploy → Deploy site.",
+                  fix: "Redeploy situs sekali dari host Anda (Netlify Deploys / Cloudflare Deployments / Vercel Deployments), atau cek Endpoint API.",
                 },
                 {
                   ok: tried ? Boolean(ping!.ok && ping!.serverVersion) : null,
