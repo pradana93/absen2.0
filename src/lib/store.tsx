@@ -6,7 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   AttendanceLog, AttendanceType, AuditLog, BoardPost, BreakRec, Company, db, decodeIdentity, Employee,
-  ensureFreshVersion, hydrateFromSql, LeaveRequest, LeaveStatus, LeaveType, MasterPayload, Notif, OrgNode,
+  ensureFreshVersion, hydrateFromSql, LeaveRequest, LeaveStatus, LeaveType, MasterPayload, Notif, OrgNode, setCloudWrites,
   Payslip, ResetToken, Role, SalaryStructure, seedAudit, seedBoardPosts, seedCompany, seedEmployees,
   seedLeaves, seedLogs, seedNotifs, seedOrgNodes, seedShifts, seedSites, Settings, Shift, Site, SmtpConfig,
   TenantIdentity,
@@ -25,6 +25,15 @@ const sqlEngine = () => import("./sql/engine").then((m) => { sqlEng = m; return 
 
 export interface LoginResult { ok: boolean; error?: string; }
 
+export interface CloudMeta {
+  status: import("./sql/cloud").CloudStatus;
+  ready: boolean;
+  rows: number;
+  counts: Record<string, number>;
+  version: string | null;
+  lastSync: number | null;
+}
+
 interface AppState {
   company: Company; sites: Site[]; siteId: string; activeSite: Site;
   employees: Employee[]; siteEmployees: Employee[];
@@ -37,6 +46,10 @@ interface AppState {
   session: Employee | null; tokenExp: number;
   sql: SqlMeta; refreshSql: () => void; runSql: (q: string) => { ok: true; result: SqlResult } | { ok: false; error: string };
   exportSqlFile: () => void; vacuumSql: () => void;
+  cloud: CloudMeta;
+  cloudInitNow: () => Promise<{ ok: boolean; error?: string }>;
+  cloudPullNow: () => Promise<boolean>;
+  cloudPing: () => Promise<import("./sql/cloud").PingResult>;
 
   login: (email: string, password: string, siteId: string) => Promise<LoginResult>;
   logout: () => void;
@@ -148,6 +161,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [engine, setEngine] = useState<EngineStatus>("boot");
   const [geo, setGeo] = useState<GeoReading | null>(null);
   const [sql, setSql] = useState<SqlMeta>({ status: "boot", version: "—", sizeKB: 0, tables: 0, rows: 0 });
+  const [cloud, setCloud] = useState<CloudMeta>({ status: "off", ready: false, rows: 0, counts: {}, version: null, lastSync: null });
+  const cloudHadDataRef = useRef(false);
   const [session, setSession] = useState<SessionState | null>(() => {
     const s = db.loadSession();
     if (!s) return null;
@@ -242,10 +257,63 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }
       setSql(eng.sqlStats());
+
+      /* Fase 2: connect to Netlify DB through the cloud function */
+      const cl = await import("./sql/cloud");
+      if (disposed) return;
+      cl.onCloudStatus((s) => setCloud((prev) => ({ ...prev, status: s })));
+      const pull = await cl.cloudPull();
+      if (disposed) return;
+      if (pull.ok) {
+        cl.setCloudActive(true);
+        setCloudWrites(true);
+        cloudHadDataRef.current = pull.hasData;
+        setCloud({ status: "on", ready: pull.ready, rows: pull.rows, counts: pull.counts, version: pull.version, lastSync: Date.now() });
+        if (pull.ready && pull.hasData) {
+          const d = pull.data;
+          if ((d.employees as Employee[]).length) setEmployees(d.employees as Employee[]);
+          if ((d.logs as AttendanceLog[]).length) setLogs(d.logs as AttendanceLog[]);
+          if ((d.leaves as LeaveRequest[]).length) setLeaves(d.leaves as LeaveRequest[]);
+          if ((d.org as OrgNode[]).length) setOrg(d.org as OrgNode[]);
+          if ((d.board as BoardPost[]).length) setBoard(d.board as BoardPost[]);
+          if ((d.audits as AuditLog[]).length) setAudits(d.audits as AuditLog[]);
+          if ((d.notifs as Notif[]).length) setNotifs(d.notifs as Notif[]);
+          if ((d.breaks as BreakRec[]).length) setBreaks(d.breaks as BreakRec[]);
+          if ((d.shifts as Shift[]).length) setShifts(d.shifts as Shift[]);
+          if ((d.sites as Site[]).length) setSites(d.sites as Site[]);
+          if ((d.company as Company[]).length) setCompany((d.company as Company[])[0]);
+          if ((d.departments as { name: string }[]).length) setDepartments((d.departments as { name: string }[]).map((x) => x.name));
+          if ((d.quotas as { type: LeaveType; days: number }[]).length) {
+            setLeaveQuotas((prev) => {
+              const next = { ...prev };
+              (d.quotas as { type: LeaveType; days: number }[]).forEach((x) => { next[x.type] = x.days; });
+              return next;
+            });
+          }
+          if ((d.salarydefaults as ({ role: Role } & SalaryStructure)[]).length) {
+            setSalaryDefaults((prev) => {
+              const next = { ...prev };
+              (d.salarydefaults as ({ role: Role } & SalaryStructure)[]).forEach((x) => {
+                const { role, ...rest } = x;
+                next[role] = rest as SalaryStructure;
+              });
+              return next;
+            });
+          }
+        }
+      } else {
+        setCloud((prev) => ({ ...prev, status: "off" }));
+      }
     });
     const onPersisted = () => { if (sqlEng) setSql(sqlEng.sqlStats()); };
+    const onCloudSynced = () => setCloud((prev) => ({ ...prev, lastSync: Date.now() }));
     window.addEventListener("vittoria:sql-persisted", onPersisted);
-    return () => { disposed = true; off?.(); window.removeEventListener("vittoria:sql-persisted", onPersisted); };
+    window.addEventListener("vittoria:cloud-synced", onCloudSynced);
+    return () => {
+      disposed = true; off?.();
+      window.removeEventListener("vittoria:sql-persisted", onPersisted);
+      window.removeEventListener("vittoria:cloud-synced", onCloudSynced);
+    };
   }, []);
 
   const refreshSql = useCallback(() => { void sqlEngine().then((e) => setSql(e.sqlStats())); }, []);
@@ -267,6 +335,70 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
   const vacuumSql = useCallback(() => { void sqlEngine().then((e) => { e.sqlVacuum(); setSql(e.sqlStats()); }); }, []);
+
+  /* --------------------- Fase 2: Netlify DB (Postgres) -------------------- */
+  /** All collections as prop-shaped rows, read from the always-current hot cache. */
+  const localSnapshot = useCallback((): Array<[string, unknown[]]> => [
+    ["company", [db.loadCompany() as unknown]],
+    ["sites", db.loadSites() as unknown[]],
+    ["employees", db.loadEmployees() as unknown[]],
+    ["logs", db.loadLogs() as unknown[]],
+    ["leaves", db.loadLeaves() as unknown[]],
+    ["shifts", db.loadShifts() as unknown[]],
+    ["org", db.loadOrg() as unknown[]],
+    ["board", db.loadBoard() as unknown[]],
+    ["departments", db.loadDepartments().map((name) => ({ name }))],
+    ["quotas", Object.entries(db.loadQuotas()).map(([type, days]) => ({ type, days }))],
+    ["salarydefaults", Object.entries(db.loadSalaryDefaults()).map(([role, s]) => ({ role, ...s }))],
+    ["audits", db.loadAudit() as unknown[]],
+    ["notifs", db.loadNotifs() as unknown[]],
+    ["breaks", db.loadBreaks() as unknown[]],
+    ["resets", db.loadResets() as unknown[]],
+  ], []);
+
+  /** Create the schema in the Netlify DB; upload local data if the DB was empty. */
+  const cloudInitNow = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    const cl = await import("./sql/cloud");
+    const res = await cl.cloudInit();
+    if (!res.ok) return res;
+    cl.setCloudActive(true);
+    setCloudWrites(true);
+    setCloud((prev) => ({ ...prev, status: "on", ready: true, lastSync: Date.now() }));
+    if (!cloudHadDataRef.current) {
+      for (const [key, rows] of localSnapshot()) cl.queueCloudSync(key, rows);
+    }
+    return res;
+  }, [localSnapshot]);
+
+  /** Manual re-pull: cloud wins, local caches are refreshed underneath. */
+  const cloudPullNow = useCallback(async (): Promise<boolean> => {
+    const cl = await import("./sql/cloud");
+    const pull = await cl.cloudPull();
+    if (!pull.ok) return false;
+    cl.setCloudActive(true);
+    setCloudWrites(true);
+    cloudHadDataRef.current = pull.hasData;
+    setCloud({ status: "on", ready: pull.ready, rows: pull.rows, counts: pull.counts, version: pull.version, lastSync: Date.now() });
+    if (pull.ready && pull.hasData) {
+      const d = pull.data;
+      if ((d.employees as Employee[]).length) setEmployees(d.employees as Employee[]);
+      if ((d.logs as AttendanceLog[]).length) setLogs(d.logs as AttendanceLog[]);
+      if ((d.leaves as LeaveRequest[]).length) setLeaves(d.leaves as LeaveRequest[]);
+      if ((d.org as OrgNode[]).length) setOrg(d.org as OrgNode[]);
+      if ((d.board as BoardPost[]).length) setBoard(d.board as BoardPost[]);
+      if ((d.audits as AuditLog[]).length) setAudits(d.audits as AuditLog[]);
+      if ((d.notifs as Notif[]).length) setNotifs(d.notifs as Notif[]);
+      if ((d.breaks as BreakRec[]).length) setBreaks(d.breaks as BreakRec[]);
+      if ((d.shifts as Shift[]).length) setShifts(d.shifts as Shift[]);
+      if ((d.sites as Site[]).length) setSites(d.sites as Site[]);
+      if ((d.company as Company[]).length) setCompany((d.company as Company[])[0]);
+      if ((d.departments as { name: string }[]).length) setDepartments((d.departments as { name: string }[]).map((x) => x.name));
+    }
+    return true;
+  }, []);
+
+  /** End-to-end health check against the Netlify DB. */
+  const cloudPing = useCallback(() => import("./sql/cloud").then((m) => m.cloudPing()), []);
 
   /* live GPS */
   useEffect(() => {
@@ -402,7 +534,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     (staffId: string, patch: Partial<Employee>) => setEmployees((prev) => prev.map((e) => (e.staffId === staffId ? { ...e, ...patch } : e))),
     [],
   );
-  const removeEmployee = useCallback((staffId: string) => setEmployees((prev) => prev.filter((e) => e.staffId !== staffId)), []);
+  const removeEmployee = useCallback((staffId: string) => {
+    setEmployees((prev) => prev.filter((e) => e.staffId !== staffId));
+    void import("./sql/cloud").then((m) => m.cloudRemove("employees", [staffId]));
+  }, []);
   const unbindDevice = useCallback((staffId: string) => {
     const emp = employeesRef.current.find((e) => e.staffId === staffId);
     setEmployees((prev) => prev.map((e) => (e.staffId === staffId ? { ...e, deviceId: null, deviceBoundAt: null } : e)));
@@ -413,7 +548,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /* --------------------------------- logs --------------------------------- */
   const addLog = useCallback((l: AttendanceLog) => setLogs((prev) => [l, ...prev]), []);
-  const clearLogs = useCallback(() => setLogs([]), []);
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+    void import("./sql/cloud").then((m) => m.cloudClear("logs"));
+  }, []);
 
   /* --------------------------------- leave -------------------------------- */
   const addLeave = useCallback((r: LeaveRequest) => setLeaves((prev) => [r, ...prev]), []);
@@ -455,6 +593,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const removeSite = useCallback((id: string): boolean => {
     if (employeesRef.current.some((e) => e.siteId === id)) return false;
     const st = sitesRef.current.find((s) => s.id === id);
+    /* cloud: delete the site's org nodes & logs explicitly (no FK cascade in the cloud schema) */
+    const orgIds = db.loadOrg().filter((n) => n.siteId === id).map((n) => n.id);
+    const logIds = db.loadLogs().filter((l) => l.siteId === id).map((l) => l.id);
+    void import("./sql/cloud").then((m) => {
+      m.cloudRemove("org", orgIds);
+      m.cloudRemove("logs", logIds);
+      m.cloudRemove("sites", [id]);
+    });
     setSites((prev) => prev.filter((s) => s.id !== id));
     setOrg((prev) => prev.filter((n) => n.siteId !== id));
     setLogs((prev) => prev.filter((l) => l.siteId !== id));
@@ -467,7 +613,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /* --------------------------------- shifts ------------------------------- */
   const addShift = useCallback((s: Shift) => setShifts((prev) => [...prev, s]), []);
   const updateShift = useCallback((id: string, patch: Partial<Shift>) => setShifts((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s))), []);
-  const removeShift = useCallback((id: string) => setShifts((prev) => prev.filter((s) => s.id !== id)), []);
+  const removeShift = useCallback((id: string) => {
+    setShifts((prev) => prev.filter((s) => s.id !== id));
+    void import("./sql/cloud").then((m) => m.cloudRemove("shifts", [id]));
+  }, []);
 
   /* ---------------------------------- org --------------------------------- */
   const addOrgNode = useCallback((n: OrgNode) => setOrg((prev) => [...prev, n]), []);
@@ -478,6 +627,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!victim) return prev;
       return prev.filter((n) => n.id !== id).map((n) => (n.parentId === id ? { ...n, parentId: victim.parentId } : n));
     });
+    void import("./sql/cloud").then((m) => m.cloudRemove("org", [id]));
   }, []);
 
   /* --------------------------------- board -------------------------------- */
@@ -649,6 +799,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setEmployees(seedEmployees()); setShifts(seedShifts()); setLogs(seedLogs(st));
     setLeaves(seedLeaves()); setOrg(seedOrgNodes()); setBoard(seedBoardPosts());
     setAudits(seedAudit()); setNotifs(seedNotifs()); setBreaks([]); setPayslips([]); setResets([]);
+    /* mirror the reset into the cloud so stale rows can't resurface on next pull */
+    void import("./sql/cloud").then((m) => {
+      if (!m.cloudActive()) return;
+      ["logs", "leaves", "org", "board", "audits", "notifs", "breaks", "resets", "employees", "shifts", "sites", "departments", "quotas", "salarydefaults", "company"]
+        .forEach((k) => m.cloudClear(k));
+    });
     setLeaveQuotas(db.loadQuotas()); setSalaryDefaults(db.loadSalaryDefaults()); setDepartments(["Gudang"]);
     setSettings({ simEnabled: false, simLat: -6.17555, simLon: 106.82735, matchThreshold: 0.5 });
     db.markSeeded();
@@ -661,6 +817,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     shifts, org, siteOrg, board, audits, notifs, breaks, payslips, settings, smtp,
     engine, geo, fence, session: sessionEmployee, tokenExp: session?.accessExp ?? 0,
     sql, refreshSql, runSql, exportSqlFile, vacuumSql,
+    cloud, cloudInitNow, cloudPullNow, cloudPing,
     login, logout, importIdentity, switchSite,
     addEmployee, updateEmployee, removeEmployee, unbindDevice,
     addLog, clearLogs,

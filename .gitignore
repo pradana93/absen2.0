@@ -3,3 +3,13 @@ node_modules/
 dist/
 build/
 *.log
+
+# secrets — NEVER commit connection strings / env files
+.env
+.env.*
+*.pem
+
+# local tooling state
+.netlify/
+.vercel/
+.DS_Store
