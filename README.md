@@ -55,7 +55,8 @@ open it in DB Browser, DBeaver, or the `sqlite3` CLI.
 (`netlify/functions/api.mjs` — also reused verbatim by Vercel, ported for
 Cloudflare & PythonAnywhere) fronts Postgres with parameterized SQL only.
 Writes bump per-table revision stamps; every device polls and pulls only what
-changed. Reads `DATABASE_URL` **or** `POSTGRES_URL` (Vercel Postgres).
+changed. Reads `DATABASE_URL` **or** `POSTGRES_URL` — works with **Supabase**,
+Vercel Postgres, Netlify DB, Neon, or any Postgres.
 
 **Host-agnostic.** Same repo deploys to **Vercel**, **Cloudflare Pages**,
 **Netlify**, or **PythonAnywhere** — the client auto-detects the host and
@@ -95,7 +96,7 @@ npm run build    # production build → dist/
 New employees take their **base photo at first login** — HR never handles it.
 
 Deploy in minutes on any of the four supported hosts — [`HOSTING.md`](./HOSTING.md).
-Currently running in production on **Vercel** with Vercel Postgres.
+Currently running in production on **Vercel** with a **Supabase** Postgres database.
 
 ## 🔒 Security
 
