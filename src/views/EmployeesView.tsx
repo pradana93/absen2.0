@@ -8,13 +8,13 @@ import { EMAIL_DOMAIN, EMAIL_RE, Employee, EmpStatus, genPassword, nextStaffId, 
 import { relTime, todayKey, wibDayKey } from "../lib/format";
 import { useToast } from "../components/Toast";
 import { Banner, Chip, ConfirmButton, EmptyState, InitialsAvatar, Modal, Toggle } from "../components/bits";
-import { IconCamera, IconCheck, IconEdit, IconFace, IconLock, IconMail, IconPlus, IconRefresh, IconSmartphone, IconTrash, IconUsers, IconX } from "../components/icons";
+import { IconAlert, IconCamera, IconCheck, IconEdit, IconFace, IconLock, IconMail, IconPlus, IconRefresh, IconSignal, IconSmartphone, IconTrash, IconUsers, IconX } from "../components/icons";
 
 const ROLE_OPTIONS: Role[] = ["employee", "manager", "companyadmin", "superadmin"];
 const STATUS_OPTIONS: EmpStatus[] = ["active", "inactive", "resigned"];
 
 export default function EmployeesView() {
-  const { session, employees, logs, shifts, sites, departments, salaryDefaults, activeSite, addEmployee, updateEmployee, removeEmployee, unbindDevice, audit } = useApp();
+  const { session, employees, logs, shifts, sites, departments, salaryDefaults, activeSite, cloud, addEmployee, updateEmployee, removeEmployee, unbindDevice, audit } = useApp();
   const toast = useToast();
   const isSuper = session?.role === "superadmin";
 
@@ -260,6 +260,15 @@ export default function EmployeesView() {
               <p className="flex justify-between gap-3"><span className="text-white/50">Email</span><span className="font-bold break-all">{credModal.email}</span></p>
               <p className="flex justify-between gap-3"><span className="text-white/50">Sandi</span><span className="font-bold tracking-wider">{credModal.password}</span></p>
             </div>
+            {cloud.status === "on" ? (
+              <p className="anim-pop flex items-center gap-2 rounded-xl bg-ok-100 px-3 py-2.5 text-[11.5px] leading-snug font-bold text-ok-600">
+                <IconSignal size={13} className="shrink-0" /> Tersinkron ke Netlify DB — {credModal.name} bisa langsung login dari perangkatnya sendiri.
+              </p>
+            ) : (
+              <p className="flex items-center gap-2 rounded-xl bg-warn-100 px-3 py-2.5 text-[11.5px] leading-snug font-bold text-warn-600">
+                <IconAlert size={13} className="shrink-0" /> Cloud belum aktif — akun ini baru ada di perangkat ini. Aktifkan lewat Master Data → Cloud.
+              </p>
+            )}
             <button className="btn-sun w-full" onClick={() => void copyCred()}>{copied ? <><IconCheck size={16} /> Tersalin!</> : "Salin Kredensial"}</button>
           </div>
         )}
