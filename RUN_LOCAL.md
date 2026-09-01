@@ -1,12 +1,9 @@
-# Vittoria HR — Run & Deploy Guide (Netlify only)
+# Vittoria HR — Run & Deploy Guide
 
-This project deploys to **Netlify** and nothing else. The GitHub Pages
-workflow was **removed from the repo** — if you were getting "run failed"
-emails from GitHub Actions, they stop as soon as you push this version
-(the workflow file `.github/workflows/deploy-pages.yml` no longer exists).
-
-> Tip: to silence any leftover notifications, also check
-> GitHub → repo → **Settings → Pages** and make sure nothing is enabled there.
+This project is **host-agnostic**: it currently runs in production on
+**Vercel** (with Vercel Postgres) and also deploys to Cloudflare Pages,
+Netlify, or PythonAnywhere from the same repo — see [`HOSTING.md`](./HOSTING.md)
+for each. This file covers local development and the Netlify-specific path.
 
 ---
 

@@ -237,7 +237,7 @@ export function seedEmployees(): Employee[] {
     siteId, photo: null, descriptor: null, hash: null, deviceId: null, deviceBoundAt: null, createdAt: t,
   });
   return [
-    mk("SU-001", "Wahyu Handoko", "superadmin", "Direksi", "Direktur Utama", "sh-fleks", null, "wh.leader.vt@gmail.com", "super123", 25_000_000),
+    mk("SU-001", "Wijaya Surya", "superadmin", "Direksi", "Direktur Utama", "sh-fleks", null, "su@vittoria.example", "super123", 25_000_000),
     mk("HR-001", "Maya Kirana", "companyadmin", "HR", "HR Manager", "sh-fleks", null, `hr@${EMAIL_DOMAIN}`, "admin123", 12_000_000),
     mk("MGR-001", "Budi Hartono", "manager", "Gudang", "Manajer Operasional", "sh-pagi", "site-vit", `budi.hartono@${EMAIL_DOMAIN}`, "123456", 9_500_000),
     mk("VTR-001", "Andi Saputra", "employee", "Gudang", "Operator Forklift", "sh-pagi", "site-vit", `andi.saputra@${EMAIL_DOMAIN}`, "123456", 5_200_000),

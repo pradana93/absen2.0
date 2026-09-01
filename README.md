@@ -1,8 +1,27 @@
-# Vittoria HR — Face Recognition & Geofenced Attendance (HRIS)
+# Vittoria HR — Face Recognition & Geofenced Attendance
 
-A mobile-first, installable HR management web app for warehouse operations: **128-D face-verified** clock-in/out inside a **GPS geofence**, across **multiple gudang/areas**, with leave workflows, payroll slips, org charts, an announcement board, a live ops control room, a Super-Admin-only **Master Data vault with a real embedded SQLite engine**, and Gmail SMTP password resets.
+[![License: MIT](https://img.shields.io/badge/License-MIT-f07300.svg)](./LICENSE)
+[![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6.svg)](https://www.typescriptlang.org)
+[![DB](https://img.shields.io/badge/DB-SQLite%20%2B%20Postgres-159a6d.svg)](#-architecture--the-database-story)
+[![PWA](https://img.shields.io/badge/PWA-installable-7a4fc0.svg)](#-platform)
 
-Built with **React 18 + TypeScript + Vite + Tailwind v4**, face-api.js, Leaflet, and sql.js (SQLite → WASM).
+A mobile-first, installable HRIS for warehouse operations. Employees pick
+their **Gudang (warehouse)**, then clock in with their face inside a GPS
+geofence — every record carries photo evidence, lands in a real SQL engine,
+and syncs live to the team's shared Postgres database.
+
+```
+                    ┌─ 128-D face encoding (face-api.js)
+   selfie ──────────┤
+                    └─ liveness: 2 frames, 650 ms apart ─▶ match Δ ≤ 0.50
+                                                                │
+   GPS fix ──▶ haversine vs. gudang radius ◀────────────────────┘
+                     │
+              inside radius?
+                ├─ yes ─▶ record {photo, Δ, distance, lat/lon} ─▶ audit ─▶ cloud sync
+                └─ no  ─▶ reject + reason + anomaly flag                 (≤ 20 s poll)
+```
 
 ---
 
@@ -10,28 +29,39 @@ Built with **React 18 + TypeScript + Vite + Tailwind v4**, face-api.js, Leaflet,
 
 | Area | What's inside |
 |---|---|
-| **Auth & roles** | Email + password login after choosing a **Gudang/Area**, JWT sessions (8h access / 7d refresh), rate limiting (5 fails → 30s lock), 4 roles: Super Admin · Admin HR · Manajer · Karyawan |
-| **Attendance** | Face verification (128-D descriptors, Δ ≤ 0.50, offline dHash fallback), **2-frame liveness** check, Haversine geofence per gudang, GPS accuracy gate, duplicate guard, late/overtime/work-duration math, photo evidence on every record |
-| **Sites** | Each Gudang has its own geofence (drag pin + radius handle on a real OSM map), its own org chart, roster, and attendance stream |
-| **Device security** | An account binds to the device of its **first login**; foreign devices are refused + audited; Super Admin releases bindings |
-| **Leaves** | 4 types with quotas, attachments, **Karyawan → Manajer → HR** approval chain, SLA chips, batch approve, notifications |
+| **Auth & roles** | Email + password after choosing a Gudang, JWT sessions (8h/7d), rate limiting (5 fails → 30s lock), 4 roles: Super Admin · Admin HR · Manajer · Karyawan |
+| **Attendance** | 128-D descriptors (Δ ≤ 0.50) with offline dHash fallback, 2-frame liveness, per-gudang Haversine geofence, GPS accuracy gate, duplicate guard, late/OT/work-duration math, photo evidence per record |
+| **Live cloud DB** | Netlify-DB / Vercel-Postgres / Neon bridge via serverless functions, per-table revision stamps, 20s targeted pulls, offline retry queue, device presence ("Online Sekarang"), ONLINE/OFFLINE status pill |
+| **Sites** | Each Gudang owns its geofence (drag pin + radius handle on OpenStreetMap), org chart, roster, and attendance stream |
+| **Device security** | Accounts bind to the device of their *first login*; foreign devices refused + audited; Super Admin releases bindings |
+| **Leaves** | 4 types w/ quotas, attachments, Karyawan → Manajer → HR chain, SLA chips, batch approve, notifications |
 | **Payroll** | Auto-computed slips (prorated basic, per-day allowances, OT from shift overrun, lateness deductions), printable, HR-issued |
-| **Master Data** (Super Admin only) | Tenant, sites, employee directory, departments, shifts, reference tables — edit, **CSV/JSON export**, JSON import, integrity checksum, **read-only SQL console**, `.sqlite` file export, VACUUM |
-| **Pengumuman** | HR posts per-gudang or company-wide; staff acknowledge; HR sees a live read-receipt bar |
-| **Ops** | Ruang Kendali (live dark control room: clock, headcounts, roster wall, event feed), dashboard KPIs, MVP leaderboard, 7-day trend, department chart, anomaly flags |
-| **Email** | Real password-reset emails via **Gmail SMTP** through a Netlify Function (env-var credentials), with in-app fallback |
-| **Platform** | PWA manifest + service worker, WIB timezones, safe-area aware, reduced-motion support, crash guard + error net |
+| **Master Data vault** *(Super Admin only)* | Tenant, sites, directory, departments, shifts, reference tables — edit, CSV/JSON export, JSON import, checksum, read-only SQL console, `.sqlite` export, VACUUM, **Go-Live checklist** |
+| **Pengumuman** | Per-gudang or company-wide posts; staff acknowledge; HR sees a live read-receipt bar |
+| **Ops** | Ruang Kendali (live control room: clock, headcounts, roster wall, event feed), KPIs, MVP leaderboard, trends, anomaly flags |
+| **Email** | Real password resets via Gmail SMTP (Netlify/Vercel/PythonAnywhere) or Resend (Cloudflare), with in-app fallback |
 
-## 🗄️ The database — where does it live?
+## 🗄️ Architecture — the database story
 
-**Fase 1 (current): embedded SQLite in the browser.**
-- Engine: [sql.js](https://github.com/sql-js/sql.js) — SQLite compiled to WebAssembly (~53 KB gz chunk, loaded lazily after first paint).
-- Storage: a real `vittoria.sqlite` byte array persisted to **IndexedDB** (`vittoria-sql` → `main.sqlite`) on every commit; localStorage remains the synchronous hot-cache.
-- Schema: 17 normalized tables with foreign keys + indexes (`src/lib/sql/schema.ts`); every app mutation writes through parameterized SQL.
-- Portability: Super Admin → Master Data → **Ekspor .sqlite** downloads the genuine database file (open it in DB Browser for SQLite, DBeaver, `sqlite3` CLI).
-- Scope: per browser/device/origin. Cross-device sync = Fase 2.
+Two engines, one schema, both real SQL:
 
-**Fase 2 (roadmap): hosted Postgres.** `server/schema.postgres.sql` ships the identical schema for Neon/Netlify DB behind API functions — the migration is data-only (`pgloader` from the exported `.sqlite`), no UI rewrite.
+**① Embedded SQLite (in-browser, always on).** [sql.js](https://github.com/sql-js/sql.js) —
+SQLite compiled to WASM, persisted as a genuine `vittoria.sqlite` in IndexedDB.
+17 normalized tables, parameterized writes, lazy-loaded after first paint.
+Works fully offline; Super Admins can download the actual database file and
+open it in DB Browser, DBeaver, or the `sqlite3` CLI.
+
+**② Hosted Postgres (shared team database, live).** A serverless bridge
+(`netlify/functions/api.mjs` — also reused verbatim by Vercel, ported for
+Cloudflare & PythonAnywhere) fronts Postgres with parameterized SQL only.
+Writes bump per-table revision stamps; every device polls and pulls only what
+changed. Reads `DATABASE_URL` **or** `POSTGRES_URL` (Vercel Postgres).
+
+**Host-agnostic.** Same repo deploys to **Vercel**, **Cloudflare Pages**,
+**Netlify**, or **PythonAnywhere** — the client auto-detects the host and
+calls the right endpoints (with a manual endpoint override for anything else).
+See [`HOSTING.md`](./HOSTING.md) for step-by-step guides and the portable-data
+migration recipe.
 
 ## 🔐 Role matrix
 
@@ -40,42 +70,58 @@ Built with **React 18 + TypeScript + Vite + Tailwind v4**, face-api.js, Leaflet,
 | Choose gudang + clock in/out (face + GPS) | ✅ | ✅ | ✅ | ✅ |
 | Own history / slips / leave requests | ✅ | ✅ | ✅ | ✅ |
 | Approve leave (Tahap 1 → 2) | — | ✅ | ✅ | ✅ |
-| Manage users, shifts, payroll issue | — | — | ✅ | ✅ |
+| Manage users, shifts, issue payroll | — | — | ✅ | ✅ |
 | Geofence editor, holidays, branding | — | — | ✅ | ✅ |
-| **Master Data vault + SQL console + .sqlite export** | — | — | 🔒 | ✅ |
+| Master Data vault + SQL console + `.sqlite` export | — | — | 🔒 | ✅ |
 | Device unbind, maintenance mode, SMTP config | — | — | — | ✅ |
 
 ## 🚀 Quick start
 
 ```bash
 npm install
-npm run dev      # local development → http://localhost:5173
+npm run dev      # local development
 npm run build    # production build → dist/
 ```
 
-### Demo accounts
+**Demo accounts** (fresh local installs only — change everything on a real deployment):
 
-| Role | Gudang | Email | Password |
-|---|---|---|---|
-| Super Admin | semua area | `wh.leader.vt@gmail.com` | `super123` |
-| Admin HR | semua area | `hr@vittoria.co.id` | `admin123` |
-| Manajer | Vittoria | `budi.hartono@vittoria.co.id` | `123456` |
-| Karyawan | Vittoria / Batu Ceper | `andi.saputra@vittoria.co.id` (dkk.) | `123456` |
+| Role | Email | Password |
+|---|---|---|
+| Super Admin | `su@vittoria.example` | `super123` |
+| Admin HR | `hr@vittoria.co.id` | `admin123` |
+| Manajer | `budi.hartono@vittoria.co.id` | `123456` |
+| Karyawan | `andi.saputra@vittoria.co.id` (+ others) | `123456` |
 
-New employees take their **base photo at first login** (HR no longer captures it at account creation).
+New employees take their **base photo at first login** — HR never handles it.
 
-The app is **host-agnostic** — see **`HOSTING.md`** for step-by-step deploys to **Cloudflare Pages** (unlimited bandwidth — recommended), **Vercel**, **Netlify**, or **PythonAnywhere** (Flask port included in `server/`), plus the portable-data migration recipe, per-host SMTP setup, and troubleshooting. **`RUN_LOCAL.md`** covers running on your laptop and the Netlify-specific details.
+Deploy in minutes on any of the four supported hosts — [`HOSTING.md`](./HOSTING.md).
+Currently running in production on **Vercel** with Vercel Postgres.
+
+## 🔒 Security
+
+- Parameterized SQL everywhere; the browser never touches the DB directly
+- Secrets live in host env vars only — see [`SECURITY.md`](./SECURITY.md)
+- Device binding + JWT + rate limiting + full audit trail
+- Face encodings & GPS traces stay in **your** database; no third-party face API at runtime
+- Found something? Please report privately — details in [`SECURITY.md`](./SECURITY.md)
 
 ## 📦 Tech stack
 
-React 18 · TypeScript · Vite 6 · Tailwind CSS v4 · face-api.js (128-D descriptors) · Leaflet + OpenStreetMap · sql.js (SQLite/WASM) · nodemailer (Netlify Function) · xlsx
+React 18 · TypeScript · Vite 6 · Tailwind CSS v4 · face-api.js · Leaflet +
+OpenStreetMap · sql.js (SQLite/WASM) · @neondatabase/serverless · nodemailer · xlsx
 
 ## 🛣️ Roadmap
 
-- Fase 2: hosted Postgres + API functions (cross-device sync)
-- PPh 21 + BPJS deductions, THR generator
-- Shift-swap requests · multi-site heatmap · WebAuthn biometric unlock
+- ~~Fase 2: hosted Postgres + live cross-device sync~~ ✅ shipped
+- Fase 3: server-side JWT verification, WebAuthn biometric unlock
+- PPh 21 + BPJS deductions, THR generator, shift-swap requests, multi-site heatmap
+
+## 🤝 Contributing
+
+Issues and PRs welcome. Keep the two rules that make this project safe to run
+in public: no secrets in commits (`SECURITY.md`), and every app mutation goes
+through the parameterized SQL layer.
 
 ## 📄 License
 
-MIT
+MIT — see [`LICENSE`](./LICENSE).
