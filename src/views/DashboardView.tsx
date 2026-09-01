@@ -64,6 +64,36 @@ function OpsTicker() {
   );
 }
 
+/** Live device presence — visible only while the cloud DB is connected. */
+function OnlineWidget() {
+  const { cloud, presence } = useApp();
+  if (cloud.status !== "on" || presence.length === 0) return null;
+  return (
+    <section className="card overflow-hidden">
+      <div className="flex items-center justify-between border-b border-ink-100 bg-gradient-to-r from-sky-100/70 to-white px-4 py-3">
+        <p className="flex items-center gap-2 font-display text-[15px] font-extrabold text-ink-900">
+          <span className="anim-blink h-2 w-2 rounded-full bg-ok-500" /> Online Sekarang
+        </p>
+        <Chip tone="sky">{presence.length} perangkat</Chip>
+      </div>
+      <div className="flex gap-2.5 overflow-x-auto px-4 py-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {presence.map((p) => (
+          <div key={p.deviceId} className="flex shrink-0 items-center gap-2.5 rounded-xl border border-ink-100 bg-white px-3 py-2 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+            <span className="relative">
+              <InitialsAvatar name={p.name} seedKey={p.staffId ?? p.deviceId} size="h-9 w-9 text-[12px]" rounded="rounded-xl" />
+              <span className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-ok-500" />
+            </span>
+            <div className="min-w-0">
+              <p className="max-w-[120px] truncate text-[12px] font-extrabold text-ink-900">{p.name}</p>
+              <p className="text-[9.5px] font-bold text-ink-400">{p.siteName ?? "HQ"} · {relTime(p.lastSeen)}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function AnomalyWidget() {
   const { logs, employees } = useApp();
   const flagged = useMemo(() => {
@@ -197,6 +227,9 @@ export default function DashboardView({ nav }: { nav: NavFn }) {
         <StatTile label="Belum" value={kpi.belum} tone="sky" sub="belum masuk" />
         <StatTile label="Ditolak" value={kpi.rejected} tone="danger" sub="geofence" />
       </div>
+
+      {/* live presence */}
+      <OnlineWidget />
 
       {/* MVP */}
       <section className="card overflow-hidden">

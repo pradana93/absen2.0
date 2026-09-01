@@ -61,6 +61,9 @@ export default function MasterDataView() {
   const [cloudBusy, setCloudBusy] = useState<"" | "init" | "pull">("");
   const [ping, setPing] = useState<import("../lib/sql/cloud").PingResult | null>(null);
   const [pingBusy, setPingBusy] = useState(false);
+  const [multiDevDone, setMultiDevDone] = useState(() => {
+    try { return localStorage.getItem("vittoria:multidev-ok") === "1"; } catch { return false; }
+  });
 
   /* site modal */
   const [siteModal, setSiteModal] = useState<{ mode: "add" | "edit"; site?: Site } | null>(null);
@@ -647,12 +650,12 @@ export default function MasterDataView() {
             </div>
           )}
 
-          {/* connection test */}
-          <div className="space-y-2.5 rounded-2xl bg-ink-50 p-3.5">
+          {/* go-live checklist */}
+          <div className="space-y-3 rounded-2xl bg-ink-50 p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[12px] font-extrabold text-ink-800">Uji Koneksi</p>
-                <p className="text-[10px] font-semibold text-ink-400">browser → Netlify Function → Postgres → kembali</p>
+                <p className="font-display text-[15px] font-extrabold text-ink-900">Checklist Go-Live Multi-Perangkat</p>
+                <p className="text-[10.5px] font-semibold text-ink-400">Akun yang dibuat di sini bisa login di HP karyawan — bila 6/6 hijau</p>
               </div>
               <button
                 className="btn-sun shrink-0 !rounded-xl !px-4 !py-2.5 !text-[12.5px]"
@@ -666,42 +669,118 @@ export default function MasterDataView() {
                   else audit("CLOUD_PING_FAIL", "netlify-db", String(res.error ?? "").slice(0, 120));
                 }}
               >
-                <IconSignal size={14} /> {pingBusy ? "Menguji…" : "Uji Sekarang"}
+                <IconSignal size={14} /> {pingBusy ? "Memeriksa…" : "Cek Semua"}
               </button>
             </div>
 
-            {ping && ping.ok && (
-              <div className="anim-fade-up">
-                <div className="grid grid-cols-2 gap-1.5 min-[480px]:grid-cols-4">
-                  <div className="rounded-lg border border-ok-300 bg-ok-100 px-2.5 py-2 text-center">
-                    <p className="font-display text-[15px] leading-tight font-extrabold text-ok-600 tabular-nums">{ping.clientMs} ms</p>
-                    <p className="text-[8.5px] font-extrabold tracking-wide text-ok-600/70 uppercase">Round-trip</p>
+            {(() => {
+              const onDeployedUrl = !/(^|\.)localhost$|^127\.0\.0\.1$/.test(window.location.hostname);
+              const tried = ping !== null;
+              const steps: Array<{ ok: boolean | null; title: string; desc: string; fix?: string }> = [
+                {
+                  ok: onDeployedUrl,
+                  title: "Dibuka dari URL yang ter-deploy",
+                  desc: "URL Netlify situs Anda (atau domain sendiri).",
+                  fix: "Cloud hanya hidup di URL hasil deploy — localhost/preview tidak memiliki Netlify Function.",
+                },
+                {
+                  ok: tried ? ping!.ok : null,
+                  title: "Fungsi `api` merespons",
+                  desc: "Jembatan browser → server → Postgres aktif.",
+                  fix: "Redeploy situs sekali: Netlify → tab Deploys → Trigger deploy → Deploy site.",
+                },
+                {
+                  ok: tried ? Boolean(ping!.ok && ping!.serverVersion) : null,
+                  title: "Postgres menjawab",
+                  desc: ping?.ok ? `${String(ping.serverVersion).replace("PostgreSQL ", "").split(" ")[0]} · ${ping.serverMs} ms di server` : "DATABASE_URL terbaca oleh fungsi.",
+                  fix: "Hubungkan Netlify DB ke site ini agar env DATABASE_URL terinjeksi, lalu redeploy.",
+                },
+                {
+                  ok: tried ? Boolean(ping!.ok && ping!.schemaReady) : null,
+                  title: "Skema 15 tabel siap",
+                  desc: ping?.ok && !ping.schemaReady && ping.missing?.length ? `Kurang: ${ping.missing.join(", ")}…` : "Tabel absensi, karyawan, cuti, dll. sudah ada.",
+                  fix: 'Tekan "Siapkan Skema & Unggah Data" di bawah — aman dijalankan berulang.',
+                },
+                {
+                  ok: tried ? Boolean(ping!.ok && (ping!.rows ?? 0) > 0) : null,
+                  title: "Data sudah di cloud",
+                  desc: ping?.ok ? `${(ping.rows ?? 0).toLocaleString("id-ID")} baris tersimpan di Postgres.` : "Seluruh data lokal terunggah sekali.",
+                  fix: "Setelah skema siap, tekan \"Siapkan Skema & Unggah Data\" untuk mengunggah data perangkat ini.",
+                },
+                {
+                  ok: multiDevDone,
+                  title: "Login dari perangkat kedua",
+                  desc: "Di HP lain: buka URL yang sama → pilih gudang → login dengan akun dari menu Pengguna.",
+                },
+              ];
+              const done = steps.filter((s) => s.ok === true).length;
+              const allDone = done === steps.length;
+              return (
+                <>
+                  <div className="flex items-center gap-2.5">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-ink-100">
+                      <div className="bar-grow-x h-full rounded-full bg-gradient-to-r from-sun-400 to-ok-500" style={{ width: `${(done / steps.length) * 100}%` }} />
+                    </div>
+                    <span className="font-display text-[13px] font-extrabold text-ink-700 tabular-nums">{done}/{steps.length}</span>
                   </div>
-                  <div className="rounded-lg border border-ink-100 bg-white px-2.5 py-2 text-center">
-                    <p className="truncate font-mono text-[11px] leading-[19px] font-extrabold text-ink-800" title={ping.serverVersion}>PG {String(ping.serverVersion ?? "").replace("PostgreSQL ", "").split(" ")[0]}</p>
-                    <p className="text-[8.5px] font-extrabold tracking-wide text-ink-400 uppercase">Server</p>
-                  </div>
-                  <div className="rounded-lg border border-ink-100 bg-white px-2.5 py-2 text-center">
-                    <p className={`font-display text-[15px] leading-tight font-extrabold tabular-nums ${ping.schemaReady ? "text-ok-600" : "text-warn-600"}`}>{ping.tables}/15</p>
-                    <p className="text-[8.5px] font-extrabold tracking-wide text-ink-400 uppercase">Tabel</p>
-                  </div>
-                  <div className="rounded-lg border border-ink-100 bg-white px-2.5 py-2 text-center">
-                    <p className="font-display text-[15px] leading-tight font-extrabold text-ink-800 tabular-nums">{(ping.rows ?? 0).toLocaleString("id-ID")}</p>
-                    <p className="text-[8.5px] font-extrabold tracking-wide text-ink-400 uppercase">Baris</p>
-                  </div>
-                </div>
-                <p className={`mt-1.5 text-[10.5px] font-bold ${ping.schemaReady ? "text-ok-600" : "text-warn-600"}`}>
-                  {ping.schemaReady
-                    ? "✓ Skema lengkap — siap sinkron."
-                    : `Skema belum dibuat (${(ping.missing ?? []).join(", ")}…) — tekan "Siapkan Skema & Unggah Data".`}
-                </p>
-              </div>
-            )}
-            {ping && !ping.ok && (
-              <p className="anim-fade-up rounded-lg bg-danger-100 px-3 py-2 text-[10.5px] leading-relaxed font-bold text-danger-600">
-                ✕ Gagal setelah {ping.clientMs} ms — {ping.error}. Periksa: DB ter-link ke site (env DATABASE_URL), site sudah redeploy, dan Anda membuka URL Netlify.
-              </p>
-            )}
+
+                  {allDone && (
+                    <p className="anim-pop rounded-xl bg-ok-100 px-3 py-2.5 text-[11.5px] leading-relaxed font-bold text-ok-600">
+                      🎉 Multi-perangkat live! Setiap akun baru yang dibuat di menu Pengguna otomatis tersedia di semua perangkat dalam ±1 detik.
+                    </p>
+                  )}
+
+                  <ol className="pt-1">
+                    {steps.map((s, i) => (
+                      <li key={s.title} className="tile-pop relative flex gap-3 pb-4 last:pb-0" style={{ animationDelay: `${i * 70}ms` }}>
+                        {i < steps.length - 1 && <span className="absolute top-7 left-[13px] h-[calc(100%-22px)] w-px bg-ink-200" aria-hidden />}
+                        <span className={`z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 ${
+                          s.ok === true ? "anim-pop border-ok-500 bg-ok-500 text-white" :
+                          s.ok === false ? "border-danger-500 bg-danger-100 text-danger-600" :
+                          "border-ink-200 bg-white text-ink-300"
+                        }`}>
+                          {s.ok === true ? <IconCheck size={13} /> : s.ok === false ? <IconX size={13} /> : <span className="anim-blink h-1.5 w-1.5 rounded-full bg-ink-300" />}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className={`text-[13px] leading-tight font-extrabold ${s.ok === true ? "text-ink-900" : s.ok === false ? "text-danger-600" : "text-ink-400"}`}>
+                            {i + 1}. {s.title}
+                          </p>
+                          <p className="mt-0.5 text-[11px] leading-snug font-semibold text-ink-400">{s.ok === false && s.fix ? s.fix : s.desc}</p>
+                          {i === steps.length - 1 && !multiDevDone && (
+                            <button
+                              className="btn-ghost mt-1.5 !rounded-lg !px-3 !py-1.5 !text-[11px]"
+                              onClick={() => {
+                                setMultiDevDone(true);
+                                try { localStorage.setItem("vittoria:multidev-ok", "1"); } catch { /* noop */ }
+                                audit("CLOUD_MULTIDEV_OK", "netlify-db", "Uji login perangkat kedua dikonfirmasi");
+                                toast.push("ok", "Selamat! 🎉", "Aplikasi Anda kini live untuk seluruh tim.");
+                              }}
+                            >
+                              <IconCheck size={12} /> Sudah saya coba & berhasil
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+
+                  {ping && ping.ok && (
+                    <div className="flex flex-wrap gap-1.5 border-t border-ink-100 pt-2.5">
+                      <Chip tone="ok"><IconSignal size={10} /> {ping.clientMs} ms round-trip</Chip>
+                      <Chip tone="ink">PG {String(ping.serverVersion).replace("PostgreSQL ", "").split(" ")[0]}</Chip>
+                      <Chip tone={ping.schemaReady ? "ok" : "warn"}>{ping.tables}/15 tabel</Chip>
+                      <Chip tone={ping.rows ? "ok" : "warn"}>{(ping.rows ?? 0).toLocaleString("id-ID")} baris</Chip>
+                    </div>
+                  )}
+                  {ping && !ping.ok && (
+                    <p className="rounded-lg bg-danger-100 px-3 py-2 text-[10.5px] leading-relaxed font-bold text-danger-600">
+                      ✕ Gagal setelah {ping.clientMs} ms — {ping.error}. Lihat petunjuk merah pada langkah 2–3 di atas.
+                    </p>
+                  )}
+                </>
+              );
+            })()}
+
           </div>
 
           {/* actions */}

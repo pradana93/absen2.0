@@ -6,6 +6,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { AppProvider, useApp } from "./lib/store";
 import { AttendanceType, ROLE_LABEL, Role, SITE_STYLE, SiteColor } from "./lib/database";
 import { fmtExpLeft } from "./lib/jwt";
+import { wibTime } from "./lib/format";
 import { Chip, InitialsAvatar } from "./components/bits";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ToastProvider, useToast } from "./components/Toast";
@@ -106,6 +107,83 @@ function geoLabel(status?: string, sim?: boolean): string {
   if (status === "denied") return "GPS OFF";
   if (status === "unavailable") return "NO GPS";
   return "GPS…";
+}
+
+/** Truthful DB status: NETLIFY DB / CLOUD ERROR / SQL LOKAL — click for details. */
+function DbStatusPill() {
+  const { cloud, sql, presence, cloudPullNow } = useApp();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const mode = cloud.status === "on" ? "cloud" : cloud.status === "error" ? "error" : "local";
+
+  const cls =
+    mode === "cloud" ? "border-sky-300 bg-sky-100/80 text-sky-600"
+    : mode === "error" ? "border-danger-300 bg-danger-100/80 text-danger-600"
+    : "border-ink-200 bg-white text-ink-500";
+  const label = mode === "cloud" ? "NETLIFY DB" : mode === "error" ? "CLOUD ERROR" : sql.status === "ready" ? "SQL LOKAL" : "CACHE";
+  const desc =
+    mode === "cloud"
+      ? "Tersambung ke Postgres — perubahan tim tersinkron antar perangkat otomatis (poll tiap 20 dtk)."
+      : mode === "error"
+        ? cloud.reason ?? "Terjadi kesalahan saat menghubungi cloud."
+        : cloud.reason ?? (sql.status === "ready"
+          ? "Mesin SQLite lokal aktif. Data belum dibagikan ke perangkat lain."
+          : "Hot-cache localStorage aktif (mesin SQL sedang dimuat).");
+
+  const row = (k: string, v: string, strong?: boolean) => (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <span className="text-[10.5px] font-bold text-ink-400">{k}</span>
+      <span className={`font-mono text-[11px] ${strong ? "font-extrabold text-ink-900" : "font-bold text-ink-600"}`}>{v}</span>
+    </div>
+  );
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9.5px] font-extrabold tracking-wider transition active:scale-95 ${cls}`}
+        aria-label="Status database"
+        title="Status database"
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${mode === "cloud" ? "anim-blink bg-sky-500" : mode === "error" ? "bg-danger-500" : sql.status === "ready" ? "bg-ok-500" : "bg-warn-500"}`} />
+        {label}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="anim-pop absolute right-0 z-50 mt-2 w-72 rounded-2xl border border-ink-100 bg-white p-4 shadow-[0_24px_60px_rgba(23,42,89,0.22)]">
+            <p className="flex items-center gap-2 font-display text-[14px] font-extrabold text-ink-900">
+              <span className={`h-2 w-2 rounded-full ${mode === "cloud" ? "anim-blink bg-sky-500" : mode === "error" ? "bg-danger-500" : "bg-ok-500"}`} />
+              {mode === "cloud" ? "Netlify DB (Postgres)" : mode === "error" ? "Cloud Bermasalah" : "Database Lokal"}
+            </p>
+            <p className="mt-1.5 text-[11px] leading-relaxed font-semibold text-ink-400">{desc}</p>
+            <div className="mt-2.5 divide-y divide-ink-100/70 rounded-xl bg-ink-50 px-3 py-1">
+              {row("Server", cloud.serverVersion ? `PG ${cloud.serverVersion.split(" ")[0]}` : "—")}
+              {row("Baris cloud", cloud.rows.toLocaleString("id-ID"))}
+              {row("Perangkat online", String(cloud.presenceActive || presence.length), true)}
+              {row("Sinkron terakhir", cloud.lastSync ? wibTime(new Date(cloud.lastSync)) : "—")}
+            </div>
+            {mode !== "local" && (
+              <button
+                className="btn-sun mt-3 w-full !py-2.5 !text-[12.5px]"
+                onClick={async () => {
+                  setOpen(false);
+                  const ok = await cloudPullNow();
+                  toast.push(ok ? "ok" : "danger", ok ? "Data cloud dimuat" : "Pull gagal", ok ? "Perubahan terbaru dari tim sudah masuk." : undefined);
+                }}
+              >
+                <IconArrowRight size={13} className="rotate-180" /> Tarik Sekarang
+              </button>
+            )}
+            {mode === "error" && (
+              <button className="btn-ghost mt-2 w-full !py-2 !text-[12px]" onClick={() => window.location.reload()}>Muat Ulang</button>
+            )}
+            <p className="mt-2 text-center text-[9.5px] font-bold text-ink-300">Detail lengkap: Master Data → Cloud</p>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function NotifBell() {
@@ -385,9 +463,7 @@ function Shell() {
               {engine === "ai" ? "AI 128-D" : engine === "lite" ? "Mode Lite" : "Memuat AI…"}
             </span>
             <span className="h-3 w-px shrink-0 bg-ink-100" />
-            <span className={`shrink-0 ${cloud.status === "on" ? "text-sky-600" : sql.status === "ready" ? "text-ok-600" : "text-warn-600"}`}>
-              {cloud.status === "on" ? "☁ Cloud DB" : sql.status === "ready" ? "SQL Lokal" : "Cache"}
-            </span>
+            <DbStatusPill />
             <span className="h-3 w-px shrink-0 bg-ink-100" />
             <span className="shrink-0 font-mono tabular-nums">Sesi {fmtExpLeft(tokenExp)}</span>
             <span className="h-3 w-px shrink-0 bg-ink-100" />
