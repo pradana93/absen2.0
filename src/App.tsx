@@ -121,6 +121,7 @@ function DbStatusPill() {
     : mode === "error" ? "border-danger-300 bg-danger-100/80 text-danger-600"
     : "border-ink-200 bg-white text-ink-500";
   const label = mode === "cloud" ? "NETLIFY DB" : mode === "error" ? "CLOUD ERROR" : sql.status === "ready" ? "SQL LOKAL" : "CACHE";
+  const onNetlify = /netlify\./.test(window.location.hostname);
   const desc =
     mode === "cloud"
       ? "Tersambung ke Postgres — perubahan tim tersinkron antar perangkat otomatis (poll tiap 20 dtk)."
@@ -157,6 +158,25 @@ function DbStatusPill() {
               {mode === "cloud" ? "Netlify DB (Postgres)" : mode === "error" ? "Cloud Bermasalah" : "Database Lokal"}
             </p>
             <p className="mt-1.5 text-[11px] leading-relaxed font-semibold text-ink-400">{desc}</p>
+            {mode === "local" && !onNetlify && (
+              <div className="anim-fade-up mt-2.5 rounded-xl border border-warn-300 bg-warn-100 px-3 py-2.5">
+                <p className="text-[11px] font-extrabold text-warn-600">👉 Buka URL Netlify Anda</p>
+                <p className="mt-0.5 text-[10.5px] leading-snug font-semibold text-warn-600/85">
+                  Fungsi cloud hanya hidup di <b>https://&lt;site-anda&gt;.netlify.app</b> —
+                  preview/localhost seperti <span className="font-mono">{window.location.hostname}</span> selalu lokal.
+                </p>
+              </div>
+            )}
+            {mode === "local" && onNetlify && (
+              <div className="anim-fade-up mt-2.5 rounded-xl border border-warn-300 bg-warn-100 px-3 py-2.5">
+                <p className="text-[11px] font-extrabold text-warn-600">Langkah mengaktifkan:</p>
+                <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[10.5px] leading-snug font-semibold text-warn-600/85">
+                  <li>Pastikan kode terbaru (dengan <span className="font-mono">netlify/functions/api.mjs</span>) sudah di-push & di-deploy</li>
+                  <li>Netlify DB ter-<i>link</i> ke site → env <span className="font-mono">DATABASE_URL</span> terinjeksi</li>
+                  <li>Super Admin → Master Data → Cloud → <b>Siapkan Skema & Unggah Data</b></li>
+                </ol>
+              </div>
+            )}
             <div className="mt-2.5 divide-y divide-ink-100/70 rounded-xl bg-ink-50 px-3 py-1">
               {row("Server", cloud.serverVersion ? `PG ${cloud.serverVersion.split(" ")[0]}` : "—")}
               {row("Baris cloud", cloud.rows.toLocaleString("id-ID"))}
