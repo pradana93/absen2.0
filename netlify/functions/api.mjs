@@ -168,6 +168,30 @@ export default async (req, context) => {
       return json({ ok: true, ready, hasData: total > 0, rows: total, counts, data, version });
     }
 
+    /* ------------------------------- ping -------------------------------- */
+    if (op === "ping") {
+      const t0 = Date.now();
+      const ver = String((await sql(`SELECT version() AS v`))[0]?.v ?? "unknown").split(", compiled")[0].split(" on ")[0];
+      let tables = 0, rowsTotal = 0;
+      const missing = [];
+      for (const s of SPECS) {
+        const ex = await sql(`SELECT to_regclass($1) AS r`, [s.table]);
+        if (ex[0]?.r) {
+          tables++;
+          const c = await sql(`SELECT COUNT(*)::int AS c FROM ${q(s.table)}`);
+          rowsTotal += Number(c[0]?.c ?? 0);
+        } else missing.push(s.table);
+      }
+      return json({
+        ok: true,
+        server_version: ver,
+        schema_ready: missing.length === 0,
+        tables, missing: missing.slice(0, 5),
+        rows: rowsTotal,
+        server_ms: Date.now() - t0,
+      });
+    }
+
     const spec = specOf(key);
     if (!spec) return json({ ok: false, error: `Tabel "${key}" tidak dikenal.` }, 400);
     const exists = await sql(`SELECT to_regclass($1) AS r`, [spec.table]);

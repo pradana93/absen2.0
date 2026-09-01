@@ -49,6 +49,7 @@ interface AppState {
   cloud: CloudMeta;
   cloudInitNow: () => Promise<{ ok: boolean; error?: string }>;
   cloudPullNow: () => Promise<boolean>;
+  cloudPing: () => Promise<import("./sql/cloud").PingResult>;
 
   login: (email: string, password: string, siteId: string) => Promise<LoginResult>;
   logout: () => void;
@@ -395,6 +396,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     return true;
   }, []);
+
+  /** End-to-end health check against the Netlify DB. */
+  const cloudPing = useCallback(() => import("./sql/cloud").then((m) => m.cloudPing()), []);
 
   /* live GPS */
   useEffect(() => {
@@ -813,7 +817,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     shifts, org, siteOrg, board, audits, notifs, breaks, payslips, settings, smtp,
     engine, geo, fence, session: sessionEmployee, tokenExp: session?.accessExp ?? 0,
     sql, refreshSql, runSql, exportSqlFile, vacuumSql,
-    cloud, cloudInitNow, cloudPullNow,
+    cloud, cloudInitNow, cloudPullNow, cloudPing,
     login, logout, importIdentity, switchSite,
     addEmployee, updateEmployee, removeEmployee, unbindDevice,
     addLog, clearLogs,

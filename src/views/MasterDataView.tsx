@@ -16,7 +16,7 @@ import { useToast } from "../components/Toast";
 import { Banner, Chip, Modal, SectionLabel, Toggle } from "../components/bits";
 import {
   IconArrowRight, IconBriefcase, IconBuilding, IconCheck, IconClock, IconCpu, IconDatabase, IconDownload,
-  IconEdit, IconEye, IconEyeOff, IconLock, IconMail, IconPin, IconPlus, IconRefresh, IconShield, IconTrash, IconUsers, IconWallet, IconX,
+  IconEdit, IconEye, IconEyeOff, IconLock, IconMail, IconPin, IconPlus, IconRefresh, IconShield, IconSignal, IconTrash, IconUsers, IconWallet, IconX,
 } from "../components/icons";
 
 type Domain = "tenant" | "sites" | "employees" | "departments" | "shifts" | "reference" | "email" | "sql" | "cloud";
@@ -50,7 +50,7 @@ export default function MasterDataView() {
     updateLeaveQuota, updateSalaryDefault, addShift, updateShift, removeShift,
     importMasterData, audit, smtp, updateSmtp, sendTestEmail,
     refreshSql, runSql, exportSqlFile, vacuumSql,
-    cloud, cloudInitNow, cloudPullNow,
+    cloud, cloudInitNow, cloudPullNow, cloudPing,
   } = app;
   const toast = useToast();
   const me = session!;
@@ -59,6 +59,8 @@ export default function MasterDataView() {
 
   const [open, setOpen] = useState<Domain | null>("sql");
   const [cloudBusy, setCloudBusy] = useState<"" | "init" | "pull">("");
+  const [ping, setPing] = useState<import("../lib/sql/cloud").PingResult | null>(null);
+  const [pingBusy, setPingBusy] = useState(false);
 
   /* site modal */
   const [siteModal, setSiteModal] = useState<{ mode: "add" | "edit"; site?: Site } | null>(null);
@@ -644,6 +646,63 @@ export default function MasterDataView() {
               ))}
             </div>
           )}
+
+          {/* connection test */}
+          <div className="space-y-2.5 rounded-2xl bg-ink-50 p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[12px] font-extrabold text-ink-800">Uji Koneksi</p>
+                <p className="text-[10px] font-semibold text-ink-400">browser → Netlify Function → Postgres → kembali</p>
+              </div>
+              <button
+                className="btn-sun shrink-0 !rounded-xl !px-4 !py-2.5 !text-[12.5px]"
+                disabled={pingBusy}
+                onClick={async () => {
+                  setPingBusy(true);
+                  const res = await cloudPing();
+                  setPing(res);
+                  setPingBusy(false);
+                  if (res.ok) audit("CLOUD_PING", "netlify-db", `OK · ${res.tables}/15 tabel · ${res.rows} baris · ${res.clientMs} ms`);
+                  else audit("CLOUD_PING_FAIL", "netlify-db", String(res.error ?? "").slice(0, 120));
+                }}
+              >
+                <IconSignal size={14} /> {pingBusy ? "Menguji…" : "Uji Sekarang"}
+              </button>
+            </div>
+
+            {ping && ping.ok && (
+              <div className="anim-fade-up">
+                <div className="grid grid-cols-2 gap-1.5 min-[480px]:grid-cols-4">
+                  <div className="rounded-lg border border-ok-300 bg-ok-100 px-2.5 py-2 text-center">
+                    <p className="font-display text-[15px] leading-tight font-extrabold text-ok-600 tabular-nums">{ping.clientMs} ms</p>
+                    <p className="text-[8.5px] font-extrabold tracking-wide text-ok-600/70 uppercase">Round-trip</p>
+                  </div>
+                  <div className="rounded-lg border border-ink-100 bg-white px-2.5 py-2 text-center">
+                    <p className="truncate font-mono text-[11px] leading-[19px] font-extrabold text-ink-800" title={ping.serverVersion}>PG {String(ping.serverVersion ?? "").replace("PostgreSQL ", "").split(" ")[0]}</p>
+                    <p className="text-[8.5px] font-extrabold tracking-wide text-ink-400 uppercase">Server</p>
+                  </div>
+                  <div className="rounded-lg border border-ink-100 bg-white px-2.5 py-2 text-center">
+                    <p className={`font-display text-[15px] leading-tight font-extrabold tabular-nums ${ping.schemaReady ? "text-ok-600" : "text-warn-600"}`}>{ping.tables}/15</p>
+                    <p className="text-[8.5px] font-extrabold tracking-wide text-ink-400 uppercase">Tabel</p>
+                  </div>
+                  <div className="rounded-lg border border-ink-100 bg-white px-2.5 py-2 text-center">
+                    <p className="font-display text-[15px] leading-tight font-extrabold text-ink-800 tabular-nums">{(ping.rows ?? 0).toLocaleString("id-ID")}</p>
+                    <p className="text-[8.5px] font-extrabold tracking-wide text-ink-400 uppercase">Baris</p>
+                  </div>
+                </div>
+                <p className={`mt-1.5 text-[10.5px] font-bold ${ping.schemaReady ? "text-ok-600" : "text-warn-600"}`}>
+                  {ping.schemaReady
+                    ? "✓ Skema lengkap — siap sinkron."
+                    : `Skema belum dibuat (${(ping.missing ?? []).join(", ")}…) — tekan "Siapkan Skema & Unggah Data".`}
+                </p>
+              </div>
+            )}
+            {ping && !ping.ok && (
+              <p className="anim-fade-up rounded-lg bg-danger-100 px-3 py-2 text-[10.5px] leading-relaxed font-bold text-danger-600">
+                ✕ Gagal setelah {ping.clientMs} ms — {ping.error}. Periksa: DB ter-link ke site (env DATABASE_URL), site sudah redeploy, dan Anda membuka URL Netlify.
+              </p>
+            )}
+          </div>
 
           {/* actions */}
           <div className="space-y-2.5">

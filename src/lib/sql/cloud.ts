@@ -114,3 +114,39 @@ export function cloudClear(key: string): void {
     try { window.dispatchEvent(new Event("vittoria:cloud-error")); } catch { /* noop */ }
   });
 }
+
+/* --------------------------------- ping ---------------------------------- */
+export interface PingResult {
+  ok: boolean;
+  serverVersion?: string;
+  schemaReady?: boolean;
+  tables?: number;
+  missing?: string[];
+  rows?: number;
+  serverMs?: number;
+  clientMs?: number;
+  error?: string;
+}
+
+/** End-to-end health check: browser → function → Postgres → back. */
+export async function cloudPing(): Promise<PingResult> {
+  const t0 = performance.now();
+  try {
+    const j = await post({ op: "ping" });
+    const clientMs = Math.round(performance.now() - t0);
+    if (status !== "on") setCloudStatus("on");
+    return {
+      ok: true,
+      serverVersion: String(j.server_version ?? ""),
+      schemaReady: Boolean(j.schema_ready),
+      tables: Number(j.tables ?? 0),
+      missing: (j.missing as string[]) ?? [],
+      rows: Number(j.rows ?? 0),
+      serverMs: Number(j.server_ms ?? 0),
+      clientMs,
+    };
+  } catch (e) {
+    setCloudStatus("error");
+    return { ok: false, error: String((e as Error)?.message ?? e), clientMs: Math.round(performance.now() - t0) };
+  }
+}

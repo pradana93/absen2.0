@@ -50,10 +50,25 @@ This is what turns the app from "one device" into "the whole warehouse shares
 one database". The browser never touches Postgres directly — a bundled Netlify
 Function (`netlify/functions/api.mjs`) runs parameterized SQL on its behalf.
 
+> ⚠️ **Credential hygiene — read first**
+> The connection string (`postgresql://netlifydb_owner:…@…db.netlify.com/…`)
+> is the **master key** to your data:
+> - Put it **only** in Netlify environment variables (steps below). Never in
+>   the repo, never in client code — `.env*` is git-ignored as a second guard.
+> - If it was ever pasted into a chat, ticket, or log, **rotate it**:
+>   dashboard → your DB → *Roles / Connection string* → reset password, then
+>   update the env var.
+> - The string in this repo's history (if any) must be purged — treat any
+>   leaked string as burned and rotate.
+
 1. **Create the DB** (you already did): Netlify dashboard → your site →
    *Storage / Databases* → add a **Netlify DB (Postgres)**.
-2. **Link it to the site** so Netlify injects the `DATABASE_URL` environment
-   variable automatically (happens when the DB is added to the site).
+2. **Make the connection string available to the function.** Either:
+   - **Linked DB (recommended):** when the DB is attached to the site, Netlify
+     injects `DATABASE_URL` automatically — nothing to type; or
+   - **Manual env var:** site → *Site configuration → Environment variables →
+     Add variable* → key `DATABASE_URL`, value = the full
+     `postgresql://…?sslmode=require` string, applies to *All scopes*.
 3. **Push & redeploy** — the `api` function goes live with the deploy.
 4. In the app: **Super Admin → Master Data → "Cloud (Netlify DB)"** →
    click **"Siapkan Skema & Unggah Data"**. The function creates all tables
