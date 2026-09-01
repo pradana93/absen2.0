@@ -50,9 +50,24 @@ Custom domain: Pages → Custom domains — HTTPS automatic. Your URL keeps work
 ## Option B — Vercel (easiest)
 
 1. [vercel.com/new](https://vercel.com/new) → import the GitHub repo (framework preset **Vite** auto-detected).
-2. Environment variables: `DATABASE_URL` (+ optional `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM_NAME` for real Gmail email — works natively on Vercel's Node runtime).
-3. Deploy. Routes: `api/db.mjs` → `/api/db`, `api/mail.mjs` → `/api/mail` (the DB route literally re-exports the Netlify handler — same code).
-4. Same verification: Master Data → Cloud → **Cek Semua**.
+2. **Database — two choices:**
+   - **Vercel's own Postgres** (yes, Vercel has one — free tier on Hobby):
+     dashboard → **Storage** tab → **Create → Postgres** → connect it to the
+     project. Vercel auto-injects `POSTGRES_URL` (pooled) — the API reads it
+     directly, no manual env needed. Free limits (~256 MB storage, 3 GB
+     transfer/mo) are far beyond attendance-scale data; check current numbers
+     under Storage → your DB → Usage.
+   - **Any external Postgres** (your Netlify DB string, or a free
+     [neon.tech](https://neon.tech) DB): add it manually as `DATABASE_URL`
+     under Project → Settings → Environment Variables.
+   Either one works — the function reads `DATABASE_URL` first, then `POSTGRES_URL`.
+3. (+ optional `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM_NAME` for real Gmail email — works natively on Vercel's Node runtime; the in-app SMTP config in Master Data also works.)
+4. Deploy. Routes: `api/db.mjs` → `/api/db`, `api/mail.mjs` → `/api/mail` (the DB route literally re-exports the Netlify handler — same code).
+5. Same verification: Master Data → Cloud → **Cek Semua**.
+
+> **Custom domain on Vercel?** Step 1 of the checklist accepts it — the ping in
+> step 2 is the real health check. The checklist header shows the exact
+> endpoint the app is calling, so nothing is guesswork.
 
 ## Option C — Netlify (your current setup)
 
@@ -107,7 +122,8 @@ protocol works: point the app at it via **Master Data → Cloud → Endpoint API
 | Symptom | Fix |
 |---|---|
 | Pill stuck on **SQL LOKAL** on a deployed URL | The host serves cached bundles — hard-refresh (Ctrl/Cmd+Shift+R); the service worker auto-updates open tabs on new deploys |
-| **OFFLINE** with "DATABASE_URL belum ada" | Add the env var in the host's dashboard, then redeploy |
+| **OFFLINE** with "Belum ada connection string" | Add `DATABASE_URL` (any host) or connect Vercel Postgres (`POSTGRES_URL` auto-injects), then redeploy |
+| Checklist stuck on **Step 1** on a deployed URL | The deploy is running an older bundle — push the latest code and redeploy; the checklist now accepts custom domains and shows the active endpoint |
 | Cloudflare: 404 on `/api` | Build didn't include `functions/` — confirm the repo root (not a subfolder) is the project source |
 | Vercel: function cold-start slow first hit | Normal for edge; subsequent calls are fast |
 | Two hosts, different data | They share one DB only if `DATABASE_URL` points to the same database — check both |

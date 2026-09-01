@@ -132,11 +132,13 @@ export default async (req, context) => {
     return new Response(JSON.stringify({ ok: false, error: "Sesi tidak ditemukan." }), { status: 401, headers });
   }
 
-  if (!process.env.DATABASE_URL) {
-    return new Response(JSON.stringify({ ok: false, error: "DATABASE_URL belum ada — hubungkan Netlify DB ke site ini (Site configuration → Environment)." }), { status: 500, headers });
+  /* DATABASE_URL (Netlify DB / manual) or POSTGRES_URL (Vercel Postgres auto-inject) */
+  const DB_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!DB_URL) {
+    return new Response(JSON.stringify({ ok: false, error: "Belum ada connection string — set env DATABASE_URL atau hubungkan Vercel Postgres / Netlify DB ke project ini." }), { status: 500, headers });
   }
 
-  const conn = neon(process.env.DATABASE_URL);
+  const conn = neon(DB_URL);
   /** Conventional parameterized query — v1.x SDK style. */
   const sql = (text, params = []) => conn.query(text, params);
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers });

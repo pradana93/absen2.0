@@ -5,7 +5,7 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { useApp } from "../lib/store";
-import { getApiOverride, isDeployedHost, setApiOverride } from "../lib/sql/cloud";
+import { apiUrl, getApiOverride, isDeployedHost, setApiOverride } from "../lib/sql/cloud";
 import {
   applyBrand, BRAND_PRESETS, DATA_VERSION, downloadBlob, downloadTextFile, encodeIdentity,
   LEAVE_TYPES, LeaveType, MasterPayload, readCrashLog, ROLE_LABEL, Role, SalaryStructure, Shift,
@@ -698,7 +698,10 @@ export default function MasterDataView() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="font-display text-[15px] font-extrabold text-ink-900">Checklist Go-Live Multi-Perangkat</p>
-                <p className="text-[10.5px] font-semibold text-ink-400">Akun yang dibuat di sini bisa login di HP karyawan — bila 6/6 hijau</p>
+                <p className="text-[10.5px] font-semibold text-ink-400">Akun yang dibuat di sini bisa login di HP karyawan — bila semua hijau</p>
+                <p className="mt-0.5 truncate font-mono text-[9.5px] font-bold text-ink-300" title={apiUrl()}>
+                  endpoint aktif: {apiUrl()}
+                </p>
               </div>
               <button
                 className="btn-sun shrink-0 !rounded-xl !px-4 !py-2.5 !text-[12.5px]"
@@ -722,9 +725,9 @@ export default function MasterDataView() {
               const steps: Array<{ ok: boolean | null; title: string; desc: string; fix?: string }> = [
                 {
                   ok: onDeployedUrl,
-                  title: "Dibuka dari URL yang ter-deploy",
-                  desc: "URL Netlify / Cloudflare / Vercel / PythonAnywhere situs Anda (atau endpoint kustom).",
-                  fix: "Cloud hanya hidup di URL hasil deploy — localhost/preview tidak memiliki fungsi server. Atau set Endpoint API kustom di bawah.",
+                  title: "Dibuka dari URL publik",
+                  desc: "URL hasil deploy — Netlify / Cloudflare / Vercel / PythonAnywhere / domain sendiri.",
+                  fix: "Localhost & preview tidak memiliki fungsi server. Buka URL publik hasil deploy, atau set Endpoint API kustom di bawah. Pastikan juga deploy Anda memakai kode terbaru (push ulang lalu redeploy).",
                 },
                 {
                   ok: tried ? ping!.ok : null,
@@ -735,8 +738,8 @@ export default function MasterDataView() {
                 {
                   ok: tried ? Boolean(ping!.ok && ping!.serverVersion) : null,
                   title: "Postgres menjawab",
-                  desc: ping?.ok ? `${String(ping.serverVersion).replace("PostgreSQL ", "").split(" ")[0]} · ${ping.serverMs} ms di server` : "DATABASE_URL terbaca oleh fungsi.",
-                  fix: "Hubungkan Netlify DB ke site ini agar env DATABASE_URL terinjeksi, lalu redeploy.",
+                  desc: ping?.ok ? `${String(ping.serverVersion).replace("PostgreSQL ", "").split(" ")[0]} · ${ping.serverMs} ms di server` : "Connection string terbaca oleh fungsi (DATABASE_URL atau POSTGRES_URL).",
+                  fix: "Vercel: Storage → Create → Postgres → hubungkan ke project (env POSTGRES_URL terinjeksi otomatis). Netlify: link Netlify DB (DATABASE_URL). Lalu redeploy.",
                 },
                 {
                   ok: tried ? Boolean(ping!.ok && ping!.schemaReady) : null,
