@@ -1,77 +1,88 @@
-# Run & Deploy Guide — Vittoria HR
+# Vittoria HR — Run & Deploy Guide (Netlify only)
 
-The app is 100% static output + one optional serverless function, so you own it completely: run it from your laptop, deploy straight from GitHub, and the preview sandbox can never lock you out.
+This project deploys to **Netlify** and nothing else. The GitHub Pages
+workflow was **removed from the repo** — if you were getting "run failed"
+emails from GitHub Actions, they stop as soon as you push this version
+(the workflow file `.github/workflows/deploy-pages.yml` no longer exists).
+
+> Tip: to silence any leftover notifications, also check
+> GitHub → repo → **Settings → Pages** and make sure nothing is enabled there.
 
 ---
 
-## 1. Run on your own machine (no preview, no cloud)
+## 1. Run on your laptop
 
 ```bash
 git clone https://github.com/USERNAME/vittoria-hr.git
 cd vittoria-hr
 npm install
-npm run dev
+npm run dev      # → http://localhost:3000
 ```
 
-Open **http://localhost:5173** — done. Camera & GPS work on `localhost` (it's a trusted origin).
-
-- `npm run build` → production files in `dist/`
-- `npm run preview` → serve the production build locally to test exactly what users get
-
-## 2. Deploy to Netlify straight from GitHub (recommended)
-
-The repo ships **`netlify.toml`** with the build command, publish dir, SPA redirects, Node version, and functions path — so Netlify configures itself:
-
-1. Push this repo to GitHub
-2. https://app.netlify.com → **Add new site → Import an existing project** → pick the repo
-3. Verify it detected `npm run build` / `dist` (it will, from the toml) → **Deploy**
-4. Live at `https://<name>.netlify.app` in ~2 minutes; **every `git push` redeploys automatically**
-
-Rename the site under *Site configuration → Change site name* (e.g. `vittoria-hr.netlify.app`).
-
-### If the page is ever blank on Netlify
-
-Almost always the publish directory. Check *Site configuration → Build & deploy*:
-- Build command must be `npm run build`
-- Publish directory must be **`dist`** (never `/`, `public`, or `build`)
-- Then **Clear cache and deploy site**, and hard-refresh (Cmd/Ctrl+Shift+R)
-
-DevTools → Network telling you `main.tsx` 404s = publish dir is wrong (source files got served instead of the build).
-
-## 3. Deploy on GitHub Pages only (no other service)
-
-1. Push to GitHub → repo **Settings → Pages → Source: “GitHub Actions”**
-2. The workflow in `.github/workflows/deploy-pages.yml` builds with `--base=./` on every push to `main`
-3. Live at `https://USERNAME.github.io/REPO/`
-
-## 4. Gmail SMTP — real password-reset emails
-
-Browsers can't speak SMTP, so sending happens in **`netlify/functions/send-mail.mjs`** (free, deployed with the site).
-
-1. Dedicated Gmail (e.g. `absensi.vittoria@gmail.com`) → enable **2-Step Verification**
-2. Google Account → Security → **App passwords** → generate a 16-char password (normal Gmail passwords are rejected since 2022)
-3. As Super Admin → **Master Data → Email & SMTP** → fill in → **Kirim Tes** → **Simpan**
-4. *(Best practice)* Copy the env vars into Netlify (*Site settings → Environment variables*): `SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USER SMTP_PASS SMTP_FROM_NAME` — the function prefers env over in-app config, so credentials don't sit in device storage
-
-If the function is unreachable or SMTP is off, the app falls back to the in-app simulated inbox and says so — nobody gets locked out. Local dev note: `npm run dev` doesn't run Netlify Functions; use `netlify login && netlify link && netlify dev` to test email locally.
-
-## 5. The database, backups, moving devices
-
-- Data lives in your browser: **IndexedDB** (a real `vittoria.sqlite` file) + localStorage hot-cache, per origin.
-- **Backup:** Super Admin → Master Data → **Ekspor .sqlite** (genuine database file) and/or **Ekspor Semua (JSON)**.
-- **Move to another device/browser/URL:** import the JSON via Master Data → Impor on the new origin; attendance history can travel as CSV.
-- Open the `.sqlite` in *DB Browser for SQLite* or `sqlite3 vittoria.sqlite` — all 17 tables are there.
-
-## 6. If the sandbox preview wipes again
-
-The sandbox can reset; **your GitHub repo cannot**. Recovery is always:
+Build for production:
 
 ```bash
-git clone … && npm install && npm run dev
+npm run build    # → dist/  (this exact folder is what Netlify serves)
+npm run preview  # test the production build locally
 ```
 
-…and your Netlify URL never went down in the first place. Export a Master Data JSON whenever you make tenant changes you care about.
+## 2. Deploy to Netlify (one time)
+
+The repo ships `netlify.toml`, so **every setting is auto-detected** — you
+should never have to type build configuration:
+
+1. https://app.netlify.com → **Add new site → Import an existing project**
+2. Choose **GitHub** → pick the repository
+3. Confirm the auto-filled settings:
+   - Build command: `npm run build`
+   - Publish directory: `dist`
+   - Functions directory: `netlify/functions`
+   - Node version: 20 (pinned via `.nvmrc` + `netlify.toml`)
+4. **Deploy** — live at `https://<name>.netlify.app` in ~2 minutes
+5. Every future `git push` redeploys automatically (watch the **Deploys** tab)
+
+Optional polish: Site configuration → **Change site name** (e.g.
+`vittoria-hr.netlify.app`) or add a custom domain — HTTPS renews automatically.
+
+## 3. Real password-reset emails (Gmail SMTP)
+
+Handled by the bundled Netlify Function (`netlify/functions/send-mail.mjs`) —
+it activates automatically with the deploy; no extra setup.
+
+1. Dedicated Gmail (e.g. `absensi.vittoria@gmail.com`) → enable **2-Step Verification**
+2. Create an **App Password** (Security → App passwords → Mail) — regular Gmail
+   passwords are rejected by Google since 2022
+3. In the app: **Super Admin → Master Data → Email & SMTP** → fill host
+   `smtp.gmail.com`, port `465`, account + App Password → **Kirim Tes** → **Simpan**
+4. *(Best practice)* **Salin Env Vars** → paste into Netlify →
+   *Site settings → Environment variables* → redeploy. The function prefers
+   env vars, so credentials never live in the browser.
+
+If SMTP is off or the function is unreachable, the app gracefully falls back
+to the in-app simulated inbox — nobody is ever locked out.
+
+## 4. Your data: backup & moving devices
+
+Data lives in each browser's storage (localStorage hot-cache + a real SQLite
+file in IndexedDB). To move a company between devices/URLs:
+
+1. Old environment: **Super Admin → Master Data → Ekspor** (JSON or `.sqlite`)
+2. New environment: **Master Data → Impor** → pick the file
+
+Attendance history exports as CSV/Excel from the **Riwayat** view.
+
+## 5. Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Blank page after deploy | Site configuration → Build & deploy → verify publish dir is `dist`, then **Clear cache and deploy site**; hard-refresh (Ctrl/Cmd+Shift+R) |
+| "GitHub Actions run failed" emails | Already fixed — the Pages workflow is deleted in this version; push once to confirm |
+| Camera/GPS refused | Browsers require HTTPS — Netlify provides it automatically; grant camera + location permissions for the site |
+| GPS stuck on "mencari…" | Desktops often have no GPS — enable **Simulasi GPS** in Aturan/Sistem for demos |
+| Stale UI after a deploy | The service worker caches assets; hard-refresh once, or unregister it in DevTools → Application |
+| Email test fails | Check the App Password (not your Gmail password); Gmail may log the attempt — approve it in Google Account security alerts |
 
 ---
 
-**Production path (Fase 2):** hosted Postgres (Neon/Netlify DB) using `server/schema.postgres.sql` — same tables, data-only migration from the exported `.sqlite`, and the UI switches from local write-through to API calls without a rewrite.
+That's the whole pipeline: `git push` → Netlify builds → live. No other
+services, no other accounts, nothing to babysit.
