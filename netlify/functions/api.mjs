@@ -1,22 +1,27 @@
 /**
- * Vittoria HR — cloud bridge (Fase 2 · v3: live sync + presence).
+ * Vittoria HR — cloud bridge (Fase 2 · v4).
  *
  * Thin serverless API between the static app and the Netlify DB (Postgres).
  * The browser never touches Postgres directly; it talks to this function,
- * which runs parameterized SQL only (identifiers whitelisted, values bound).
+ * which runs parameterized SQL only (identifiers whitelisted, values always
+ * bound — no injection surface).
+ *
+ * NOTE: written for @neondatabase/serverless v1.x — uses sql.query(text, params)
+ * (the conventional placeholder style). Works on v0.x too.
  *
  * Ops (POST JSON, header `x-vittoria-session` required):
- *   { op: "ping" }                     → health + schema state + latency
- *   { op: "stats" }                    → revs per table, row counts, presence
- *   { op: "init" }                     → create schema (idempotent)
- *   { op: "pull", keys? }              → full or filtered collection read
- *   { op: "sync", key, rows }          → upsert + bump table revision
- *   { op: "remove", key, ids }         → delete by primary key (+rev bump)
- *   { op: "clear", key }               → empty table (+rev bump)
- *   { op: "presence", device, ... }    → heartbeat; returns active devices
+ *   { op: "init" }                    → create all tables (idempotent)
+ *   { op: "pull", keys? }             → read all / a subset of collections
+ *   { op: "sync", key, rows }         → upsert rows, bump table revision
+ *   { op: "remove", key, ids }        → delete by primary key, bump revision
+ *   { op: "clear", key }              → empty a table, bump revision
+ *   { op: "stats" }                   → counts, revisions, active presence
+ *   { op: "ping" }                    → end-to-end health check
+ *   { op: "presence", deviceId, … }   → heartbeat + current roster
  *
- * Env: DATABASE_URL is injected when the Netlify DB is linked to the site.
- * Keep SPECS in sync with src/lib/sql/bridge.ts.
+ * Env: DATABASE_URL is injected when the Netlify DB is linked to the site
+ * (or added manually under Environment variables). Keep SPECS in sync with
+ * src/lib/sql/bridge.ts.
  */
 import { neon } from "@neondatabase/serverless";
 
@@ -78,18 +83,15 @@ const SPECS = [
 ];
 
 const META_DDL = `CREATE TABLE IF NOT EXISTS "meta" ("k" TEXT PRIMARY KEY, "v" TEXT)`;
-const PRESENCE_DDL = `CREATE TABLE IF NOT EXISTS "presence" (
-  "device_id" TEXT PRIMARY KEY, "staff_id" TEXT, "name" TEXT, "role" TEXT,
-  "site_id" TEXT, "site_name" TEXT, "last_seen" BIGINT, "ua" TEXT)`;
+const PRESENCE_DDL = `CREATE TABLE IF NOT EXISTS "device_presence" (
+  "device_id" TEXT PRIMARY KEY, "staff_id" TEXT, "staff_name" TEXT, "role" TEXT,
+  "site_id" TEXT, "site_name" TEXT, "ts" BIGINT
+)`;
+const PRESENCE_WINDOW_MS = 3 * 60_000;
 const SCHEMA_VERSION = "3";
-const ACTIVE_WINDOW_MS = 3 * 60_000; // presence "online" window
 
 const specOf = (key) => SPECS.find((s) => s.key === key);
-const q = (ident) => `"${String(ident).replace(/"/g, "")}"`;
-const mapPresence = (r) => ({
-  deviceId: r.device_id, staffId: r.staff_id, name: r.name, role: r.role,
-  siteId: r.site_id, siteName: r.site_name, lastSeen: Number(r.last_seen),
-});
+const q = (ident) => `"${ident.replace(/"/g, "")}"`;
 
 /* ------------------------------ value mapping ---------------------------- */
 function toDb(v, kind) {
@@ -105,22 +107,6 @@ function toProp(v, kind) {
   if (kind === "b") return Boolean(v);
   if (kind === "i" || kind === "r") return Number(v);
   return String(v);
-}
-
-/** Bump a table's revision stamp so other devices know to re-pull. */
-async function bumpRev(sql, key) {
-  await sql(
-    `INSERT INTO "meta" ("k","v") VALUES ($1,'1')
-     ON CONFLICT ("k") DO UPDATE SET "v" = (CAST(COALESCE("meta"."v",'0') AS BIGINT) + 1)::text`,
-    [`rev_${key}`],
-  );
-}
-
-async function activePresence(sql) {
-  const ex = await sql(`SELECT to_regclass('presence') AS r`);
-  if (!ex[0]?.r) return [];
-  const rows = await sql(`SELECT * FROM "presence" WHERE "last_seen" >= $1 ORDER BY "last_seen" DESC LIMIT 50`, [Date.now() - ACTIVE_WINDOW_MS]);
-  return rows.map(mapPresence);
 }
 
 /* --------------------------------- handler ------------------------------- */
@@ -145,11 +131,14 @@ export default async (req, context) => {
   if (!req.headers.get("x-vittoria-session")) {
     return new Response(JSON.stringify({ ok: false, error: "Sesi tidak ditemukan." }), { status: 401, headers });
   }
+
   if (!process.env.DATABASE_URL) {
     return new Response(JSON.stringify({ ok: false, error: "DATABASE_URL belum ada — hubungkan Netlify DB ke site ini (Site configuration → Environment)." }), { status: 500, headers });
   }
 
-  const sql = neon(process.env.DATABASE_URL);
+  const conn = neon(process.env.DATABASE_URL);
+  /** Conventional parameterized query — v1.x SDK style. */
+  const sql = (text, params = []) => conn.query(text, params);
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers });
 
   let body;
@@ -157,69 +146,10 @@ export default async (req, context) => {
   const { op, key, rows, ids, keys } = body;
 
   try {
-    /* ------------------------------- ping -------------------------------- */
-    if (op === "ping") {
-      const t0 = Date.now();
-      const ver = String((await sql(`SELECT version() AS v`))[0]?.v ?? "unknown").split(", compiled")[0].replace("PostgreSQL ", "");
-      let tables = 0, rowsTotal = 0;
-      const missing = [];
-      for (const s of SPECS) {
-        const ex = await sql(`SELECT to_regclass($1) AS r`, [s.table]);
-        if (ex[0]?.r) {
-          tables++;
-          const c = await sql(`SELECT COUNT(*)::int AS c FROM ${q(s.table)}`);
-          rowsTotal += Number(c[0]?.c ?? 0);
-        } else missing.push(s.table);
-      }
-      const presence = await activePresence(sql);
-      return json({
-        ok: true, server_version: ver, schema_ready: missing.length === 0,
-        tables, missing: missing.slice(0, 5), rows: rowsTotal,
-        presence_active: presence.length, server_ms: Date.now() - t0,
-      });
-    }
-
-    /* ------------------------------- stats ------------------------------- */
-    if (op === "stats") {
-      const t0 = Date.now();
-      let version = null;
-      const revs = {};
-      try {
-        const m = await sql(`SELECT "k","v" FROM "meta"`);
-        for (const r of m) {
-          if (r.k === "schema_version") version = r.v;
-          else if (String(r.k).startsWith("rev_")) revs[String(r.k).slice(4)] = String(r.v ?? "0");
-        }
-      } catch { /* meta missing → treat as fresh */ }
-      let tables = 0, rowsTotal = 0;
-      for (const s of SPECS) {
-        const ex = await sql(`SELECT to_regclass($1) AS r`, [s.table]);
-        if (ex[0]?.r) {
-          tables++;
-          const c = await sql(`SELECT COUNT(*)::int AS c FROM ${q(s.table)}`);
-          rowsTotal += Number(c[0]?.c ?? 0);
-        }
-      }
-      const presence = await activePresence(sql);
-      const ver = String((await sql(`SELECT version() AS v`))[0]?.v ?? "").split(",")[0].replace("PostgreSQL ", "");
-      return json({ ok: true, version, revs, tables, rows: rowsTotal, server_version: ver, presence_active: presence, server_ms: Date.now() - t0 });
-    }
-
-    /* ------------------------------ presence ----------------------------- */
-    if (op === "presence") {
+    /* presence ops need the table even before a full init */
+    if (op === "stats" || op === "presence" || op === "ping") {
+      await sql(META_DDL);
       await sql(PRESENCE_DDL);
-      const { device, staffId, name, role, siteId, siteName, ua } = body;
-      if (device) {
-        await sql(
-          `INSERT INTO "presence" ("device_id","staff_id","name","role","site_id","site_name","last_seen","ua")
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-           ON CONFLICT ("device_id") DO UPDATE SET
-             "staff_id"=EXCLUDED."staff_id","name"=EXCLUDED."name","role"=EXCLUDED."role",
-             "site_id"=EXCLUDED."site_id","site_name"=EXCLUDED."site_name","last_seen"=EXCLUDED."last_seen"`,
-          [String(device), staffId ?? null, String(name ?? "?").slice(0, 80), String(role ?? "?").slice(0, 24), siteId ?? null, siteName ?? null, Date.now(), String(ua ?? "").slice(0, 120)],
-        );
-      }
-      return json({ ok: true, presence_active: await activePresence(sql) });
     }
 
     /* ------------------------------- init -------------------------------- */
@@ -232,22 +162,17 @@ export default async (req, context) => {
       }
       await sql(`INSERT INTO "meta" ("k","v") VALUES ('schema_version',$1),('created_at',$2)
                  ON CONFLICT ("k") DO UPDATE SET "v" = EXCLUDED."v"`, [SCHEMA_VERSION, String(Date.now())]);
-      /* seed revision stamps for every table */
-      for (const s of SPECS) {
-        await sql(`INSERT INTO "meta" ("k","v") VALUES ($1,'0') ON CONFLICT ("k") DO NOTHING`, [`rev_${s.key}`]);
-      }
       return json({ ok: true, schema_version: SCHEMA_VERSION, tables: SPECS.length });
     }
 
     /* ------------------------------- pull -------------------------------- */
     if (op === "pull") {
-      const wanted = Array.isArray(keys) && keys.length ? new Set(keys) : null;
+      const wanted = Array.isArray(keys) && keys.length ? SPECS.filter((s) => keys.includes(s.key)) : SPECS;
       const data = {};
       const counts = {};
       let ready = true;
       let total = 0;
-      for (const s of SPECS) {
-        if (wanted && !wanted.has(s.key)) continue;
+      for (const s of wanted) {
         const exists = await sql(`SELECT to_regclass($1) AS r`, [s.table]);
         if (!exists[0]?.r) { ready = false; counts[s.key] = 0; data[s.key] = []; continue; }
         const raw = await sql(`SELECT * FROM ${q(s.table)}`);
@@ -270,44 +195,120 @@ export default async (req, context) => {
     const exists = await sql(`SELECT to_regclass($1) AS r`, [spec.table]);
     if (!exists[0]?.r) return json({ ok: false, error: "Skema belum dibuat — jalankan op:init dulu." }, 409);
 
+    const bumpRev = () => sql(
+      `INSERT INTO "meta" ("k","v") VALUES ($1,$2) ON CONFLICT ("k") DO UPDATE SET "v" = EXCLUDED."v"`,
+      [`rev:${key}`, String(Date.now())],
+    );
+
     /* ------------------------------- sync -------------------------------- */
     if (op === "sync") {
       if (!Array.isArray(rows)) return json({ ok: false, error: "rows harus array." }, 400);
-      if (rows.length > 0) {
-        const cols = spec.cols.map(([, c]) => q(c)).join(", ");
-        const setCols = spec.cols.filter(([, c]) => c !== spec.pk).map(([, c]) => `${q(c)} = EXCLUDED.${q(c)}`).join(", ");
-        const CHUNK = Math.max(1, Math.floor(60000 / spec.cols.length)); // stay under 65535 params
-        for (let i = 0; i < rows.length; i += CHUNK) {
-          const batch = rows.slice(i, i + CHUNK);
-          const params = [];
-          const tuples = batch.map((row) => {
-            const marks = spec.cols.map(([p, , k]) => { params.push(toDb(row[p], k)); return `$${params.length}`; }).join(", ");
-            return `(${marks})`;
-          });
-          await sql(
-            `INSERT INTO ${q(spec.table)} (${cols}) VALUES ${tuples.join(", ")}
-             ON CONFLICT (${q(spec.pk)}) DO UPDATE SET ${setCols || `${q(spec.pk)} = EXCLUDED.${q(spec.pk)}`}`,
-            params,
-          );
-        }
+      if (rows.length === 0) { await bumpRev(); return json({ ok: true, affected: 0 }); }
+      const cols = spec.cols.map(([, c]) => q(c)).join(", ");
+      const setCols = spec.cols.filter(([, c]) => c !== spec.pk).map(([, c]) => `${q(c)} = EXCLUDED.${q(c)}`).join(", ");
+      const width = spec.cols.length;
+      const CHUNK = Math.max(1, Math.floor(60000 / width)); // under Postgres' 65535 params
+      let affected = 0;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const batch = rows.slice(i, i + CHUNK);
+        const params = [];
+        const tuples = batch.map((row) => {
+          const marks = spec.cols.map(([p, , k]) => { params.push(toDb(row[p], k)); return `$${params.length}`; }).join(", ");
+          return `(${marks})`;
+        });
+        await sql(
+          `INSERT INTO ${q(spec.table)} (${cols}) VALUES ${tuples.join(", ")}
+           ON CONFLICT (${q(spec.pk)}) DO UPDATE SET ${setCols || `${q(spec.pk)} = EXCLUDED.${q(spec.pk)}`}`,
+          params,
+        );
+        affected += batch.length;
       }
-      await bumpRev(sql, key);
-      return json({ ok: true, affected: rows.length });
+      await bumpRev();
+      await sql(`INSERT INTO "meta" ("k","v") VALUES ('last_push',$1) ON CONFLICT ("k") DO UPDATE SET "v" = EXCLUDED."v"`, [String(Date.now())]);
+      return json({ ok: true, affected });
     }
 
     /* ------------------------------- remove ------------------------------ */
     if (op === "remove") {
       if (!Array.isArray(ids) || ids.length === 0) return json({ ok: true, affected: 0 });
       await sql(`DELETE FROM ${q(spec.table)} WHERE ${q(spec.pk)} = ANY($1)`, [ids.map(String)]);
-      await bumpRev(sql, key);
+      await bumpRev();
       return json({ ok: true, affected: ids.length });
     }
 
     /* ------------------------------- clear ------------------------------- */
     if (op === "clear") {
       await sql(`DELETE FROM ${q(spec.table)}`);
-      await bumpRev(sql, key);
+      await bumpRev();
       return json({ ok: true });
+    }
+
+    /* ------------------------------- stats ------------------------------- */
+    if (op === "stats") {
+      let total = 0;
+      const counts = {};
+      let tables = 0;
+      for (const s of SPECS) {
+        const ex = await sql(`SELECT to_regclass($1) AS r`, [s.table]);
+        if (!ex[0]?.r) { counts[s.key] = 0; continue; }
+        tables++;
+        const c = await sql(`SELECT COUNT(*)::int AS c FROM ${q(s.table)}`);
+        counts[s.key] = Number(c[0]?.c ?? 0);
+        total += counts[s.key];
+      }
+      const revRows = await sql(`SELECT "k", "v" FROM "meta" WHERE "k" LIKE 'rev:%'`);
+      const revs = {};
+      for (const r of revRows) revs[String(r.k).slice(4)] = String(r.v);
+      let version = null;
+      try { version = (await sql(`SELECT "v" FROM "meta" WHERE "k"='schema_version'`))[0]?.v ?? null; } catch { /* noop */ }
+      const ver = String((await sql(`SELECT version() AS v`))[0]?.v ?? "").split(", compiled")[0].split(" on ")[0];
+      const pres = await sql(`SELECT * FROM "device_presence" WHERE "ts" > $1 ORDER BY "ts" DESC`, [Date.now() - PRESENCE_WINDOW_MS]);
+      return json({
+        ok: true, rows: total, tables, version, revs, counts,
+        server_version: ver,
+        presence_active: pres.map(presenceRow),
+      });
+    }
+
+    /* ------------------------------ presence ----------------------------- */
+    if (op === "presence") {
+      if (body.deviceId) {
+        await sql(
+          `INSERT INTO "device_presence" ("device_id","staff_id","staff_name","role","site_id","site_name","ts")
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT ("device_id") DO UPDATE SET
+             "staff_id"=EXCLUDED."staff_id","staff_name"=EXCLUDED."staff_name","role"=EXCLUDED."role",
+             "site_id"=EXCLUDED."site_id","site_name"=EXCLUDED."site_name","ts"=EXCLUDED."ts"`,
+          [String(body.deviceId), body.staffId ?? null, String(body.name ?? ""), String(body.role ?? ""),
+           body.siteId ?? null, body.siteName ?? null, Date.now()],
+        );
+      }
+      const pres = await sql(`SELECT * FROM "device_presence" WHERE "ts" > $1 ORDER BY "ts" DESC`, [Date.now() - PRESENCE_WINDOW_MS]);
+      return json({ ok: true, presence_active: pres.map(presenceRow) });
+    }
+
+    /* ------------------------------- ping -------------------------------- */
+    if (op === "ping") {
+      const t0 = Date.now();
+      const ver = String((await sql(`SELECT version() AS v`))[0]?.v ?? "unknown").split(", compiled")[0].split(" on ")[0];
+      let tables = 0, rowsTotal = 0;
+      const missing = [];
+      for (const s of SPECS) {
+        const ex = await sql(`SELECT to_regclass($1) AS r`, [s.table]);
+        if (ex[0]?.r) {
+          tables++;
+          const c = await sql(`SELECT COUNT(*)::int AS c FROM ${q(s.table)}`);
+          rowsTotal += Number(c[0]?.c ?? 0);
+        } else missing.push(s.table);
+      }
+      return json({
+        ok: true,
+        server_version: ver,
+        schema_ready: missing.length === 0,
+        tables, missing: missing.slice(0, 5),
+        rows: rowsTotal,
+        server_ms: Date.now() - t0,
+      });
     }
 
     return json({ ok: false, error: `Op "${op}" tidak dikenal.` }, 400);
@@ -315,3 +316,16 @@ export default async (req, context) => {
     return json({ ok: false, error: String(e?.message ?? e).slice(0, 300) }, 500);
   }
 };
+
+/* snake_case row → camelCase PresenceRow (matches the client interface) */
+function presenceRow(r) {
+  return {
+    deviceId: String(r.device_id ?? ""),
+    staffId: r.staff_id ?? null,
+    name: String(r.staff_name ?? ""),
+    role: String(r.role ?? ""),
+    siteId: r.site_id ?? null,
+    siteName: r.site_name ?? null,
+    lastSeen: Number(r.ts ?? 0),
+  };
+}
