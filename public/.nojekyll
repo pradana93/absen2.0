@@ -1,0 +1,2 @@
+# Tells GitHub Pages not to run Jekyll — required so underscore-prefixed
+# files (like _redirects) and all assets ship untouched.

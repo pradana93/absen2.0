@@ -209,7 +209,7 @@ function IconLogoMini() {
 }
 
 function Shell() {
-  const { session, company, sites, siteId, switchSite, activeSite, engine, geo, fence, tokenExp, logout, sql } = useApp();
+  const { session, company, sites, siteId, switchSite, activeSite, engine, geo, fence, tokenExp, logout, sql, leaves } = useApp();
   const toast = useToast();
   const [view, setView] = useState<ViewId>("home");
   const [initialType, setInitialType] = useState<AttendanceType>("IN");
@@ -272,6 +272,17 @@ function Shell() {
   };
   const dismissInstall = () => { setInstallGone(true); try { localStorage.setItem("vittoria:install-dismissed", "1"); } catch { /* noop */ } };
 
+  /* pending-leave badge — computed BEFORE any early return (hooks must run unconditionally) */
+  const pendingLeaves = useMemo((): string | null => {
+    if (!session) return null;
+    const r = DOCK[session.role] ? session.role : "employee";
+    let n = 0;
+    if (r === "companyadmin" || r === "superadmin") n = leaves.filter((l) => l.status === "pending_hr").length;
+    else if (r === "manager") n = leaves.filter((l) => l.status === "pending").length;
+    else n = leaves.filter((l) => l.staffId === session.staffId && (l.status === "pending" || l.status === "pending_hr")).length;
+    return n > 0 ? String(n) : null;
+  }, [session?.staffId, session?.role, leaves]);
+
   /* session expiry warning */
   const warnedRef = useRef(false);
   useEffect(() => { warnedRef.current = false; }, [session?.staffId]);
@@ -298,7 +309,7 @@ function Shell() {
     if (role !== "superadmin") return <LockedVault />;
     return (
       <div className="app-bg min-h-dvh">
-        <div className="mx-auto w-full max-w-3xl px-4 py-6">
+        <div className="pt-safe mx-auto w-full max-w-3xl px-4 pt-4 pb-10">
           <MasterDataView />
           <button className="btn-ghost mx-auto mt-4 flex !py-2.5 !text-[13px]" onClick={() => nav(HOME[role])}>
             <IconArrowRight size={14} className="rotate-180" /> Kembali ke Dashboard
@@ -322,8 +333,6 @@ function Shell() {
       </div>
     );
   }
-
-  const pendingLeaves = usePendingLeaves(role, session.staffId);
 
   return (
     <div className="app-bg min-h-dvh">
@@ -358,11 +367,13 @@ function Shell() {
                 <IconPin size={11} className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-sun-600" />
               </div>
             )}
-            <Chip tone={engine === "ai" ? "teal" : engine === "lite" ? "warn" : "ink"} className="hidden min-[420px]:inline-flex"><IconCpu size={10} /> {engine === "ai" ? "AI" : engine === "lite" ? "LITE" : "…"}</Chip>
-            <Chip tone={sql.status === "ready" ? "ok" : "warn"} className="hidden min-[460px]:inline-flex" >
+            <Chip tone={engine === "ai" ? "teal" : engine === "lite" ? "warn" : "ink"} className="hidden min-[480px]:inline-flex"><IconCpu size={10} /> {engine === "ai" ? "AI" : engine === "lite" ? "LITE" : "…"}</Chip>
+            <Chip tone={sql.status === "ready" ? "ok" : "warn"} className="hidden min-[520px]:inline-flex">
               <IconDatabase size={10} /> SQL
             </Chip>
-            <Chip tone={geoTone(geo?.status)}><IconSignal size={10} /> {geoLabel(geo?.status, geo?.simulated)}</Chip>
+            {/* GPS status: kept compact on phones — full detail lives in the Absen view */}
+            <Chip tone={geoTone(geo?.status)} className="hidden min-[400px]:inline-flex"><IconSignal size={10} /> {geoLabel(geo?.status, geo?.simulated)}</Chip>
+            <span className={`min-[400px]:hidden h-2 w-2 shrink-0 rounded-full ${geo?.status === "locked" || geo?.status === "sim" ? "bg-ok-500" : geo?.status === "denied" ? "bg-danger-500" : "bg-warn-500"}`} title={geoLabel(geo?.status, geo?.simulated)} />
             <NotifBell />
             <LogoutBtn />
           </div>
@@ -449,15 +460,6 @@ function Shell() {
       </div>
     </div>
   );
-}
-
-function usePendingLeaves(r: Role, staffId: string): string | null {
-  const { leaves } = useApp();
-  let n = 0;
-  if (r === "companyadmin" || r === "superadmin") n = leaves.filter((l) => l.status === "pending_hr").length;
-  else if (r === "manager") n = leaves.filter((l) => l.status === "pending").length;
-  else n = leaves.filter((l) => l.staffId === staffId && (l.status === "pending" || l.status === "pending_hr")).length;
-  return n > 0 ? String(n) : null;
 }
 
 function TabBtn({ t, active, onClick, badge }: { t: TabDef; active: boolean; onClick: () => void; badge?: string | null }) {

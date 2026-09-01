@@ -308,8 +308,8 @@ export default function HomeView({ nav }: { nav: NavFn }) {
       {/* quick actions */}
       <section>
         <SectionLabel>Aksi Cepat</SectionLabel>
-        <div className="grid grid-cols-3 gap-2 min-[420px]:grid-cols-6">
-          {quick.map((q) => (
+          {/* 3-up everywhere: labels stay readable & targets stay thumb-sized */}
+          <div className="grid grid-cols-3 gap-2">          {quick.map((q) => (
             <button key={q.label} onClick={q.onClick} className="card card-press flex flex-col items-center gap-1.5 py-3">
               <span className={`grid h-10 w-10 place-items-center rounded-2xl ${q.tint}`}>{q.icon}</span>
               <span className="text-[10px] font-extrabold text-ink-700">{q.label}</span>
