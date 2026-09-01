@@ -793,12 +793,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const postMail = useCallback(async (to: string, subject: string, html: string, text: string): Promise<{ ok: boolean; error?: string }> => {
     const cfg = smtpRef.current;
-    if (!cfg.enabled || !cfg.user || !cfg.pass) return { ok: false, error: "SMTP belum dikonfigurasi." };
+    const { mailUrl } = await import("./sql/cloud");
     try {
       const ctl = new AbortController();
       const t = window.setTimeout(() => ctl.abort(), 12_000);
-      const res = await fetch("/.netlify/functions/send-mail", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const res = await fetch(mailUrl(), {
+        method: "POST", headers: { "Content-Type": "application/json", "x-vittoria-session": sessionRef.current?.access ?? "local-session" },
         body: JSON.stringify({ to, subject, html, text, config: { host: cfg.host, port: cfg.port, secure: cfg.secure, user: cfg.user, pass: cfg.pass, fromName: cfg.fromName } }),
         signal: ctl.signal,
       });
@@ -809,7 +809,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       return { ok: true };
     } catch {
-      return { ok: false, error: "Fungsi email tidak terjangkau — deploy ulang agar Netlify Function aktif." };
+      return { ok: false, error: "Fungsi email tidak terjangkau di host ini." };
     }
   }, []);
 

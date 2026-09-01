@@ -23,7 +23,48 @@ let active = false;
 export const cloudActive = () => active;
 export function setCloudActive(v: boolean) { active = v; if (!v && status === "on") setCloudStatus("off"); }
 
-const apiUrl = () => new URL(".netlify/functions/api", window.location.href).href;
+/* ------------------------- host-aware endpoints -------------------------- */
+const OVERRIDE_KEY = "vittoria:apiUrl";
+
+export function getApiOverride(): string | null {
+  try { return localStorage.getItem(OVERRIDE_KEY); } catch { return null; }
+}
+export function setApiOverride(v: string | null): void {
+  try {
+    if (v) localStorage.setItem(OVERRIDE_KEY, v);
+    else localStorage.removeItem(OVERRIDE_KEY);
+  } catch { /* private mode */ }
+}
+
+/** True when running on a real host where serverless functions exist. */
+export function isDeployedHost(): boolean {
+  const h = window.location.hostname;
+  return (
+    /(^|\.)netlify\.app$/.test(h) ||
+    /(^|\.)pages\.dev$/.test(h) ||
+    /(^|\.)vercel\.app$/.test(h) ||
+    /(^|\.)pythonanywhere\.com$/.test(h) ||
+    Boolean(getApiOverride())
+  );
+}
+
+export function apiUrl(): string {
+  const o = getApiOverride();
+  if (o) return o;
+  const h = window.location.hostname;
+  if (/(^|\.)pages\.dev$/.test(h)) return new URL("/api", window.location.href).href;            // Cloudflare Pages Function
+  if (/(^|\.)vercel\.app$/.test(h)) return new URL("/api/db", window.location.href).href;         // Vercel edge route
+  if (/(^|\.)pythonanywhere\.com$/.test(h)) return new URL("/api/ops", window.location.href).href; // Flask
+  return new URL(".netlify/functions/api", window.location.href).href;                            // Netlify (default)
+}
+
+export function mailUrl(): string {
+  const h = window.location.hostname;
+  if (/(^|\.)pages\.dev$/.test(h)) return new URL("/send-mail", window.location.href).href;
+  if (/(^|\.)vercel\.app$/.test(h)) return new URL("/api/mail", window.location.href).href;
+  if (/(^|\.)pythonanywhere\.com$/.test(h)) return new URL("/api/mail", window.location.href).href;
+  return new URL(".netlify/functions/send-mail", window.location.href).href;
+}
 
 function sessionToken(): string {
   try {

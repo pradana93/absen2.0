@@ -7,6 +7,7 @@ import { AppProvider, useApp } from "./lib/store";
 import { AttendanceType, ROLE_LABEL, Role, SITE_STYLE, SiteColor } from "./lib/database";
 import { fmtExpLeft } from "./lib/jwt";
 import { wibTime } from "./lib/format";
+import { isDeployedHost } from "./lib/sql/cloud";
 import { Chip, InitialsAvatar } from "./components/bits";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ToastProvider, useToast } from "./components/Toast";
@@ -114,13 +115,13 @@ function DbStatusPill() {
   const { cloud, presence, cloudPullNow } = useApp();
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const onNetlify = /netlify\./.test(window.location.hostname);
+  const deployed = isDeployedHost();
 
   /* online = connected · offline = deployed but can't reach the DB ·
      connecting = probe in flight (or not yet started) · local = preview/localhost by design */
   const mode: "online" | "offline" | "connecting" | "local" =
     cloud.status === "on" ? "online"
-    : !onNetlify ? "local"
+    : !deployed ? "local"
     : cloud.status === "connecting" || (cloud.status === "off" && !cloud.reason) ? "connecting"
     : "offline";
 
