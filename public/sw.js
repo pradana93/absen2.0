@@ -1,6 +1,6 @@
 /* Vittoria HR service worker — network-first shell, cache-first assets.
    Scope-relative: works on the domain root AND GitHub Pages subpaths. */
-const CACHE = "vittoria-hr-v7";
+const CACHE = "vittoria-hr-v8"; // bump on every release — invalidates stale shells
 /* base = the directory this sw.js lives in (e.g. "/" or "/repo-name/") */
 const BASE = self.location.pathname.replace(/[^/]*$/, "");
 
@@ -19,7 +19,15 @@ self.addEventListener("activate", (e) => {
     caches
       .keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
+      .then(() => self.clients.claim())
+      /* new release detected → refresh open tabs once so nobody runs a stale build */
+      .then(() =>
+        self.clients.matchAll({ type: "window" }).then((clients) => {
+          for (const c of clients) {
+            if ("navigate" in c) c.navigate(c.url).catch(() => undefined);
+          }
+        }),
+      ),
   );
 });
 
