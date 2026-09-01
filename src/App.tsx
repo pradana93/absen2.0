@@ -154,10 +154,9 @@ function LogoutBtn() {
   }, [armed]);
   return (
     <button onClick={() => (armed ? logout() : setArmed(true))}
-      className={`grid h-9 cursor-pointer items-center rounded-xl border px-2.5 font-display text-[11.5px] font-bold transition-all active:scale-90 ${armed ? "anim-pop border-danger-500 bg-danger-500 text-white shadow-[0_4px_16px_rgba(229,72,77,0.45)]" : "border-ink-100 bg-white text-ink-400 hover:border-danger-300 hover:bg-danger-100/50 hover:text-danger-600"}`}
-      aria-label="Keluar">
-      <IconLogoutIn size={14} />
-      {armed && <span>Keluar?</span>}
+      className={`grid h-9 min-w-9 cursor-pointer place-items-center rounded-xl border px-1.5 font-display text-[10px] font-extrabold transition-all active:scale-90 ${armed ? "anim-pop border-danger-500 bg-danger-500 px-2.5 text-white shadow-[0_4px_16px_rgba(229,72,77,0.45)]" : "border-ink-100 bg-white text-ink-400 hover:border-danger-300 hover:text-danger-600"}`}
+      aria-label="Keluar dari akun" title="Keluar">
+      {armed ? "Yakin?" : <IconLogoutIn size={15} />}
     </button>
   );
 }
@@ -272,6 +271,11 @@ function Shell() {
   };
   const dismissInstall = () => { setInstallGone(true); try { localStorage.setItem("vittoria:install-dismissed", "1"); } catch { /* noop */ } };
 
+  /* dock clearance: the "Powered by Netlify" badge only exists on netlify.app */
+  useEffect(() => {
+    document.documentElement.style.setProperty("--dock-lift", /netlify\./.test(window.location.hostname) ? "44px" : "10px");
+  }, []);
+
   /* pending-leave badge — computed BEFORE any early return (hooks must run unconditionally) */
   const pendingLeaves = useMemo((): string | null => {
     if (!session) return null;
@@ -338,26 +342,23 @@ function Shell() {
     <div className="app-bg min-h-dvh">
       <ErrorNet />
       <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col">
-        <header className="pt-safe sticky top-0 z-30 border-b border-ink-100 bg-paper/90 backdrop-blur print:hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5">
+        <header className="pt-safe sticky top-0 z-30 border-b border-ink-100 bg-paper/95 shadow-[0_1px_0_rgba(23,42,89,0.03)] backdrop-blur-md print:hidden">
+          {/* row 1 — identity + actions */}
+          <div className="flex items-center gap-2.5 px-4 pt-2.5">
             {company.logo ? (
-              <img src={company.logo} alt={company.appName} className="h-9 w-9 shrink-0 rounded-xl object-cover shadow-[0_4px_14px_rgba(23,42,89,0.25)] ring-1 ring-ink-100" />
+              <img src={company.logo} alt={company.appName} className="h-10 w-10 shrink-0 rounded-[14px] object-cover shadow-[0_6px_16px_rgba(23,42,89,0.22)] ring-1 ring-ink-100" />
             ) : (
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-sun-400 to-sun-600 text-white shadow-[0_4px_14px_rgba(240,115,0,0.35)]"><IconBuilding size={17} /></span>
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[14px] bg-gradient-to-br from-sun-400 to-sun-600 text-white shadow-[0_6px_16px_rgba(240,115,0,0.38)]"><IconBuilding size={19} /></span>
             )}
             <div className="min-w-0 flex-1">
-              <p className="truncate font-display text-[14px] leading-tight font-extrabold text-ink-900">{company.appName ?? "Vittoria HR"}</p>
-              <p className="flex items-center gap-1 truncate text-[9.5px] font-bold text-ink-400">
-                <span className="truncate">{session.name} · {ROLE_LABEL[role]}</span>
-                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${SITE_STYLE[(activeSite?.color as SiteColor) ?? "sun"].dot}`} />
-                <span className="shrink-0 font-mono text-[8.5px]">{activeSite?.shortName}</span>
-              </p>
+              <p className="truncate font-display text-[16px] leading-tight font-extrabold tracking-tight text-ink-900">{company.appName ?? "Vittoria HR"}</p>
+              <p className="truncate text-[10.5px] font-bold text-ink-400">{session.name} · {ROLE_LABEL[role]}</p>
             </div>
             {/* site switcher for central roles */}
             {(role === "superadmin" || role === "companyadmin") && sites.length > 1 && (
               <div className="relative">
                 <select
-                  className="cursor-pointer appearance-none rounded-xl border border-ink-100 bg-white py-1.5 pr-7 pl-2.5 font-display text-[11px] font-extrabold text-ink-700 transition hover:border-ink-200"
+                  className="h-9 cursor-pointer appearance-none rounded-xl border border-ink-100 bg-white pr-7 pl-2.5 font-display text-[11px] font-extrabold text-ink-700 transition hover:border-sun-400 active:scale-95"
                   value={siteId}
                   onChange={(e) => { switchSite(e.target.value); toast.push("info", "Konteks gudang diganti", sites.find((s) => s.id === e.target.value)?.name ?? ""); }}
                   aria-label="Pilih gudang"
@@ -367,15 +368,28 @@ function Shell() {
                 <IconPin size={11} className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-sun-600" />
               </div>
             )}
-            <Chip tone={engine === "ai" ? "teal" : engine === "lite" ? "warn" : "ink"} className="hidden min-[480px]:inline-flex"><IconCpu size={10} /> {engine === "ai" ? "AI" : engine === "lite" ? "LITE" : "…"}</Chip>
-            <Chip tone={sql.status === "ready" ? "ok" : "warn"} className="hidden min-[520px]:inline-flex">
-              <IconDatabase size={10} /> SQL
-            </Chip>
-            {/* GPS status: kept compact on phones — full detail lives in the Absen view */}
-            <Chip tone={geoTone(geo?.status)} className="hidden min-[400px]:inline-flex"><IconSignal size={10} /> {geoLabel(geo?.status, geo?.simulated)}</Chip>
-            <span className={`min-[400px]:hidden h-2 w-2 shrink-0 rounded-full ${geo?.status === "locked" || geo?.status === "sim" ? "bg-ok-500" : geo?.status === "denied" ? "bg-danger-500" : "bg-warn-500"}`} title={geoLabel(geo?.status, geo?.simulated)} />
             <NotifBell />
             <LogoutBtn />
+          </div>
+          {/* row 2 — living status strip (always fits, never truncates the brand) */}
+          <div className="flex items-center gap-2 overflow-x-auto px-4 pt-1.5 pb-2 text-[10px] font-extrabold tracking-wide text-ink-400 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <span className="flex shrink-0 items-center gap-1.5">
+              <span className={`h-2 w-2 rounded-full ${geo?.status === "locked" || geo?.status === "sim" ? "anim-blink bg-ok-500" : geo?.status === "denied" ? "bg-danger-500" : "bg-warn-500"}`} />
+              {geoLabel(geo?.status, geo?.simulated)}
+            </span>
+            <span className="h-3 w-px shrink-0 bg-ink-100" />
+            <span className={`shrink-0 ${engine === "ai" ? "text-teal-600" : engine === "lite" ? "text-warn-600" : ""}`}>
+              {engine === "ai" ? "AI 128-D" : engine === "lite" ? "Mode Lite" : "Memuat AI…"}
+            </span>
+            <span className="h-3 w-px shrink-0 bg-ink-100" />
+            <span className={`shrink-0 ${sql.status === "ready" ? "text-ok-600" : "text-warn-600"}`}>SQL {sql.status === "ready" ? "Aktif" : "…"}</span>
+            <span className="h-3 w-px shrink-0 bg-ink-100" />
+            <span className="shrink-0 font-mono tabular-nums">Sesi {fmtExpLeft(tokenExp)}</span>
+            <span className="h-3 w-px shrink-0 bg-ink-100" />
+            <span className="flex shrink-0 items-center gap-1.5">
+              <span className={`h-2 w-2 rounded-full ${SITE_STYLE[(activeSite?.color as SiteColor) ?? "sun"].dot}`} />
+              {activeSite?.shortName} · {activeSite?.radiusM} m
+            </span>
           </div>
         </header>
 
@@ -437,7 +451,7 @@ function Shell() {
                   className={`flex cursor-pointer flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 transition-all duration-150 active:scale-95 ${featuresActive ? "text-sun-600" : "text-ink-300 hover:text-ink-500"}`}
                   aria-label="Fitur lainnya">
                   <IconGrid size={featuresActive ? 21 : 19} />
-                  <span className={`text-[9.5px] ${featuresActive ? "font-extrabold" : "font-bold"}`}>Fitur</span>
+                  <span className={`text-[10.5px] ${featuresActive ? "font-extrabold" : "font-bold"}`}>Fitur</span>
                   <span className={`h-1 w-1 rounded-full ${featuresActive ? "bg-sun-500" : "bg-transparent"}`} />
                 </button>
               </div>
@@ -471,7 +485,7 @@ function TabBtn({ t, active, onClick, badge }: { t: TabDef; active: boolean; onC
         {t.icon(active ? 21 : 19)}
         {badge && <span className="anim-pop absolute -top-1.5 -right-2.5 grid h-4 min-w-4 place-items-center rounded-full bg-coral-500 px-1 text-[8.5px] font-extrabold text-white shadow-sm">{badge}</span>}
       </span>
-      <span className={`text-[9.5px] font-extrabold ${active ? "" : "font-bold"}`}>{t.label}</span>
+      <span className={`text-[10.5px] ${active ? "font-extrabold" : "font-bold"}`}>{t.label}</span>
       <span className={`h-1 w-1 rounded-full transition-all ${active ? "bg-sun-500" : "bg-transparent"}`} />
     </button>
   );

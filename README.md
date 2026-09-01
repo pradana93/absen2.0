@@ -64,7 +64,7 @@ npm run build    # production build → dist/
 
 New employees take their **base photo at first login** (HR no longer captures it at account creation).
 
-See **`RUN_LOCAL.md`** for the full walkthrough: running locally, deploying to **Netlify** (config committed — zero dashboard setup), GitHub Pages, Gmail SMTP setup, and troubleshooting.
+See **`RUN_LOCAL.md`** for the full walkthrough: running locally, deploying to **Netlify** (the only supported host — config committed, zero dashboard setup), Gmail SMTP setup, backups, and troubleshooting. The former GitHub Pages workflow has been removed.
 
 ## 📦 Tech stack
 

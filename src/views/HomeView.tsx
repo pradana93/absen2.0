@@ -34,7 +34,7 @@ function LiveClock() {
   const part = partOfDay(wibHourNow());
   return (
     <>
-      <p className="font-mono text-[38px] leading-none font-bold tracking-tight tabular-nums">
+      <p className="font-mono text-[46px] leading-none font-bold tracking-tight tabular-nums drop-shadow-[0_4px_16px_rgba(0,0,0,0.18)]">
         {wibClock(now)} <span className="text-[15px] font-semibold text-white/60">WIB</span>
       </p>
       <p className="mt-1.5 text-[12px] font-semibold text-white/70">{wibDate(now)} · {GREET[part]}</p>
@@ -229,7 +229,7 @@ export default function HomeView({ nav }: { nav: NavFn }) {
             <InitialsAvatar name={me.name} photo={me.photo} seedKey={me.staffId} size="h-12 w-12 text-[16px]" rounded="rounded-2xl" />
             <div className="min-w-0">
               <p className="text-[12px] font-bold text-white/75">{me.staffId} · {activeSite.shortName}</p>
-              <h1 className="truncate font-display text-[22px] leading-tight font-extrabold">Halo, {me.name.split(" ")[0]}!</h1>
+              <h1 className="truncate font-display text-[24px] leading-tight font-extrabold tracking-tight">Halo, {me.name.split(" ")[0]}!</h1>
             </div>
           </div>
           <div className="mt-4"><LiveClock /></div>

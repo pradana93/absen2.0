@@ -58,6 +58,10 @@ button, a, [role="button"] { touch-action: manipulation; }
 
 .card { @apply rounded-2xl border border-ink-100 bg-white shadow-[0_10px_30px_rgba(23,42,89,0.06)]; }
 .card-press { @apply transition-transform duration-150 active:scale-[0.98]; }
+@media (hover: hover) {
+  .card { transition: box-shadow 0.2s ease, transform 0.2s ease; }
+  .card:hover { box-shadow: 0 16px 40px rgba(23, 42, 89, 0.11); }
+}
 
 /* font-size ≥16px: prevents iOS Safari's auto-zoom on focus */
 .input {
@@ -166,7 +170,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.45); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
-:root { --dock-lift: 44px; }
+:root { --dock-lift: 10px; } /* bumped to 44px at runtime on netlify.app */
 .pb-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px + var(--dock-lift)); }
 .nav-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px + var(--dock-lift)); }
 .above-dock { bottom: calc(96px + var(--dock-lift)); }
