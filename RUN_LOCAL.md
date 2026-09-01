@@ -74,10 +74,11 @@ Function (`netlify/functions/api.mjs`) runs parameterized SQL on its behalf.
    click **"Siapkan Skema & Unggah Data"**. The function creates all tables
    (idempotent — safe to re-run) and uploads your current local data.
 5. From then on, every change (clock-in, leave, new employee…) is written
-   locally *and* pushed to Postgres (~0.8 s debounce), and every device
-   hydrates from Postgres on load. The header strip shows **☁ Cloud DB**
-   when connected; **SQL Lokal** means offline/local-only.
-
+locally *and* pushed to Postgres (~0.8 s debounce), and every device
+hydrates from Postgres on load. The header strip shows a green
+**ONLINE** when connected to the server DB, red **OFFLINE** when a
+deployed site can't reach it, and neutral **SQL LOKAL** only on
+preview/localhost (where cloud functions can't run).
 Useful operations in that same panel: **Tarik dari Cloud Sekarang**
 (force re-pull), per-table row counts, last-sync time, and a status badge.
 
