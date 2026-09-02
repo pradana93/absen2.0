@@ -117,9 +117,9 @@ function presenceRow(r) {
 
 /* --------------------- lazy pool (serverless-friendly) ------------------- */
 let pool = null;
-function getPool() {
-  if (pool) return pool;
-  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+function getPool(dbUrlOverride = null) {
+  if (pool && !dbUrlOverride) return pool;
+  const url = dbUrlOverride || process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (!url) throw new Error("NO_DB_URL");
   const opts = { connectionString: url, max: 1, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 8_000 };
   /* Supabase (and most managed Postgres) require SSL; opt out only if the
@@ -167,17 +167,22 @@ export default async (req, context) => {
 
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers });
 
+  let body;
+  try { body = await req.json(); } catch { return json({ ok: false, error: "Body tidak valid." }, 400); }
+  const { op, key, rows, ids, keys, dbUrl } = body;
+
+  /* Support override connection string from client (Setup Wizard flow) */
   let poolInst;
   try {
-    poolInst = getPool();
+    if (dbUrl && typeof dbUrl === "string" && dbUrl.startsWith("postgresql://")) {
+      poolInst = getPool(dbUrl);
+    } else {
+      poolInst = getPool();
+    }
   } catch {
     return json({ ok: false, error: "Belum ada connection string — set env DATABASE_URL (atau POSTGRES_URL). Supabase: pakai string Transaction pooler (port 6543)." }, 500);
   }
   const sql = async (text, params = []) => (await poolInst.query(text, params)).rows;
-
-  let body;
-  try { body = await req.json(); } catch { return json({ ok: false, error: "Body tidak valid." }, 400); }
-  const { op, key, rows, ids, keys } = body;
 
   try {
     /* schema + maintenance tables always ensured for meta-dependent ops */
