@@ -15,6 +15,7 @@ import { uid } from "../lib/format";
 import GeofenceMap, { GeoDraft } from "../components/GeofenceMap";
 import { useToast } from "../components/Toast";
 import { Banner, Chip, Modal, SectionLabel, Toggle } from "../components/bits";
+import SetupWizard from "../components/SetupWizard";
 import {
   IconArrowRight, IconBriefcase, IconBuilding, IconCheck, IconClock, IconCpu, IconDatabase, IconDownload,
   IconEdit, IconEye, IconEyeOff, IconLock, IconMail, IconPin, IconPlus, IconRefresh, IconShield, IconSignal, IconTrash, IconUsers, IconWallet, IconX,
@@ -66,6 +67,7 @@ export default function MasterDataView() {
   const [multiDevDone, setMultiDevDone] = useState(() => {
     try { return localStorage.getItem("vittoria:multidev-ok") === "1"; } catch { return false; }
   });
+  const [setupOpen, setSetupOpen] = useState(false);
 
   /* site modal */
   const [siteModal, setSiteModal] = useState<{ mode: "add" | "edit"; site?: Site } | null>(null);
@@ -857,34 +859,47 @@ export default function MasterDataView() {
           {/* actions */}
           <div className="space-y-2.5">
             {(!cloud.ready || cloud.status !== "on") && (
+              <>
+                <button
+                  className="btn-sun w-full"
+                  disabled={cloudBusy !== ""}
+                  onClick={() => setSetupOpen(true)}
+                >
+                  <IconDatabase size={16} /> Setup Database Cloud (Wizard)
+                </button>
+                <button
+                  className="btn-ghost w-full !text-[11px]"
+                  disabled={cloudBusy !== ""}
+                  onClick={async () => {
+                    setCloudBusy("init");
+                    const res = await cloudInitNow();
+                    setCloudBusy("");
+                    if (res.ok) { audit("CLOUD_INIT", "netlify-db", "Skema Postgres disiapkan & data lokal diunggah"); toast.push("ok", "Cloud siap 🎉", "Skema dibuat. Perubahan kini tersinkron ke Netlify DB."); }
+                    else toast.push("danger", "Gagal menyiapkan cloud", res.error);
+                  }}
+                >
+                  <IconDatabase size={14} /> {cloudBusy === "init" ? "Menyiapkan skema…" : "Siapkan Skema & Unggah Data (Manual)"}
+                </button>
+              </>
+            )}
+            {cloud.ready && cloud.status === "on" && (
               <button
-                className="btn-sun w-full"
-                disabled={cloudBusy !== ""}
+                className="btn-ghost w-full"
+                disabled={cloudBusy !== "" || cloud.status !== "on"}
                 onClick={async () => {
-                  setCloudBusy("init");
-                  const res = await cloudInitNow();
+                  setCloudBusy("pull");
+                  const ok = await cloudPullNow();
                   setCloudBusy("");
-                  if (res.ok) { audit("CLOUD_INIT", "netlify-db", "Skema Postgres disiapkan & data lokal diunggah"); toast.push("ok", "Cloud siap 🎉", "Skema dibuat. Perubahan kini tersinkron ke Netlify DB."); }
-                  else toast.push("danger", "Gagal menyiapkan cloud", res.error);
+                  if (ok) { audit("CLOUD_PULL", "netlify-db", "Data cloud ditarik ke perangkat"); toast.push("ok", "Data cloud dimuat", "Cache lokal diperbarui dari Postgres."); }
+                  else toast.push("danger", "Gagal menarik data", "Periksa koneksi & Netlify DB.");
                 }}
               >
-                <IconDatabase size={16} /> {cloudBusy === "init" ? "Menyiapkan skema…" : "Siapkan Skema & Unggah Data"}
+                <IconArrowRight size={15} className="rotate-180" /> {cloudBusy === "pull" ? "Menarik data…" : "Tarik dari Cloud Sekarang"}
               </button>
             )}
-            <button
-              className="btn-ghost w-full"
-              disabled={cloudBusy !== "" || cloud.status !== "on"}
-              onClick={async () => {
-                setCloudBusy("pull");
-                const ok = await cloudPullNow();
-                setCloudBusy("");
-                if (ok) { audit("CLOUD_PULL", "netlify-db", "Data cloud ditarik ke perangkat"); toast.push("ok", "Data cloud dimuat", "Cache lokal diperbarui dari Postgres."); }
-                else toast.push("danger", "Gagal menarik data", "Periksa koneksi & Netlify DB.");
-              }}
-            >
-              <IconArrowRight size={15} className="rotate-180" /> {cloudBusy === "pull" ? "Menarik data…" : "Tarik dari Cloud Sekarang"}
-            </button>
           </div>
+
+          {setupOpen && <SetupWizard onComplete={() => setSetupOpen(false)} />}
 
           {cloud.status !== "on" && (
             <div className="rounded-xl bg-warn-100/70 px-3 py-2.5 text-[11px] leading-relaxed font-semibold text-warn-600">
