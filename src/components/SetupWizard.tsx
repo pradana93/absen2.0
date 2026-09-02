@@ -146,7 +146,7 @@ export default function SetupWizard({ onComplete }: { onComplete: () => void }) 
   ];
 
   return (
-    <Modal isOpen title="🗄️ Setup Database Cloud" onClose={onComplete} wide>
+    <Modal open title="🗄️ Setup Database Cloud" onClose={onComplete} wide>
       <div className="space-y-6">
         {/* Step indicators */}
         <div className="flex items-center gap-2">
