@@ -863,7 +863,10 @@ export default function MasterDataView() {
                 <button
                   className="btn-sun w-full"
                   disabled={cloudBusy !== ""}
-                  onClick={() => setSetupOpen(true)}
+                  onClick={() => {
+                    console.log("Opening Setup Wizard...");
+                    setSetupOpen(true);
+                  }}
                 >
                   <IconDatabase size={16} /> Setup Database Cloud (Wizard)
                 </button>
@@ -899,7 +902,14 @@ export default function MasterDataView() {
             )}
           </div>
 
-          {setupOpen && <SetupWizard onComplete={() => setSetupOpen(false)} />}
+          {setupOpen && (
+            <SetupWizard 
+              onComplete={() => {
+                console.log("Setup Wizard completed/closed");
+                setSetupOpen(false);
+              }} 
+            />
+          )}
 
           {cloud.status !== "on" && (
             <div className="rounded-xl bg-warn-100/70 px-3 py-2.5 text-[11px] leading-relaxed font-semibold text-warn-600">
