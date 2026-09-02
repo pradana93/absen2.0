@@ -1,24 +1,27 @@
-```
-# Environment
-.env
-.env.local
-.env.*
-
+```gitignore
 # Dependencies
 node_modules/
+
+# Build outputs
+dist/
+build/
+*.js
+*.ts
+*.tsx
+*.jsx
 
 # Logs and temp files
 *.log
 *.tmp
 
+# Environment variables
+.env
+.env.local
+*.env.*
+
 # Editors
 .vscode/
 .idea/
-
-# Build artifacts
-dist/
-build/
-target/
 
 # Python
 __pycache__/
@@ -26,7 +29,27 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Compression files
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+
+# Distribution / packaging
+.Python
+*.egg-info/
+.eggs/
+.installed.cfg
+*.egg
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Compressed files
 *.zip
 *.gz
 *.tar

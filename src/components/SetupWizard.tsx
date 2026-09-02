@@ -55,6 +55,10 @@ export default function SetupWizard({ onComplete }: { onComplete: () => void }) 
   const [pullResult, setPullResult] = useState<Awaited<ReturnType<typeof cloudPull>> | null>(null);
   const existing = loadConfig();
 
+  const handleClose = () => {
+    onComplete();
+  };
+
   const handleSaveAndTest = async () => {
     if (!connStr.trim()) {
       setError("Connection string tidak boleh kosong");
@@ -129,7 +133,8 @@ export default function SetupWizard({ onComplete }: { onComplete: () => void }) 
     } else {
       toast.push("warn", "Aktivasi berhasil, tapi pull data gagal", "Data akan disinkronkan otomatis nanti");
     }
-    onComplete();
+    // Advance to step 5 before closing
+    setStep(5);
   };
 
   const steps = [
@@ -141,7 +146,7 @@ export default function SetupWizard({ onComplete }: { onComplete: () => void }) 
   ];
 
   return (
-    <Modal isOpen title="🗄️ Setup Database Cloud" onClose={onComplete} wide>
+    <Modal open title="🗄️ Setup Database Cloud" onClose={onComplete} wide>
       <div className="space-y-6">
         {/* Step indicators */}
         <div className="flex items-center gap-2">
@@ -201,6 +206,11 @@ export default function SetupWizard({ onComplete }: { onComplete: () => void }) 
             <button className="btn-sun w-full !py-3" onClick={() => setStep(2)}>
               <IconDatabase size={16} /> Lanjut ke Input Connection String
             </button>
+            <div className="pt-2">
+              <button className="btn-ghost w-full !py-2.5" onClick={handleClose}>
+                Batal
+              </button>
+            </div>
           </div>
         )}
 
@@ -232,8 +242,8 @@ export default function SetupWizard({ onComplete }: { onComplete: () => void }) 
             )}
 
             <div className="flex gap-2">
-              <button className="btn-ghost flex-1 !py-2.5" onClick={() => setStep(1)}>
-                Kembali
+              <button className="btn-ghost flex-1 !py-2.5" onClick={handleClose}>
+                Batal
               </button>
               <button
                 className="btn-sun flex-1 !py-2.5 disabled:opacity-50"
@@ -273,8 +283,8 @@ export default function SetupWizard({ onComplete }: { onComplete: () => void }) 
             )}
 
             <div className="flex gap-2">
-              <button className="btn-ghost flex-1 !py-2.5" onClick={() => setStep(2)}>
-                Ulangi dari Awal
+              <button className="btn-ghost flex-1 !py-2.5" onClick={handleClose}>
+                Tutup
               </button>
               <button className="btn-sun flex-1 !py-2.5" onClick={handlePullData}>
                 <IconRefresh size={16} /> Lanjut: Tarik Data ke Cloud
@@ -315,8 +325,8 @@ export default function SetupWizard({ onComplete }: { onComplete: () => void }) 
             )}
 
             <div className="flex gap-2">
-              <button className="btn-ghost flex-1 !py-2.5" onClick={() => setStep(3)}>
-                Test Ulang
+              <button className="btn-ghost flex-1 !py-2.5" onClick={handleClose}>
+                Tutup
               </button>
               <button className="btn-sun flex-1 !py-2.5" onClick={handleActivate}>
                 <IconCheck size={16} /> Aktivasi Live Sync
@@ -345,7 +355,7 @@ export default function SetupWizard({ onComplete }: { onComplete: () => void }) 
               </ul>
             </div>
 
-            <button className="btn-sun w-full !py-3" onClick={handleActivate}>
+            <button className="btn-sun w-full !py-3" onClick={handleClose}>
               Mulai Menggunakan
             </button>
           </div>
