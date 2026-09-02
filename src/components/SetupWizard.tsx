@@ -45,6 +45,7 @@ function clearConfig(): void {
 
 export default function SetupWizard({ onComplete }: { onComplete: () => void }) {
   const app = useApp();
+  const { cloudPullNow } = app;
   const toast = useToast();
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [connStr, setConnStr] = useState("");
@@ -119,10 +120,16 @@ export default function SetupWizard({ onComplete }: { onComplete: () => void }) 
     }
   };
 
-  const handleActivate = () => {
+  const handleActivate = async () => {
     setCloudActive(true);
+    // Use the app's cloudPullNow to properly update the store state
+    const success = await cloudPullNow();
+    if (success) {
+      toast.push("ok", "Live Sync Aktif!", "Database cloud sekarang aktif");
+    } else {
+      toast.push("warn", "Aktivasi berhasil, tapi pull data gagal", "Data akan disinkronkan otomatis nanti");
+    }
     onComplete();
-    toast.push("ok", "Live Sync Aktif!", "Database cloud sekarang aktif");
   };
 
   const steps = [
