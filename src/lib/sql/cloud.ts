@@ -81,7 +81,11 @@ async function post(body: unknown): Promise<Record<string, unknown>> {
   const payload = dbUrl ? { ...(body as object), dbUrl } : body;
   const res = await fetch(apiUrl(), {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-vittoria-session": sessionToken() },
+    headers: { 
+      "Content-Type": "application/json", 
+      "x-vittoria-session": sessionToken(),
+      ...(dbUrl ? { "x-db-connection": dbUrl } : {})
+    },
     body: JSON.stringify(payload),
   });
   const j = (await res.json().catch(() => null)) as Record<string, unknown> | null;
