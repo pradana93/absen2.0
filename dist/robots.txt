@@ -1,0 +1,3 @@
+# Vittoria HR is an internal workforce tool — nothing here should be indexed.
+User-agent: *
+Disallow: /
